@@ -1,0 +1,46 @@
+# -------------------------
+# Python 环境与缓存
+# -------------------------
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# -------------------------
+# Node.js / Next.js
+# -------------------------
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+
+# -------------------------
+# 环境密钥与安全
+# -------------------------
+.env
+*.pem
+
+# -------------------------
+# AgentOps 开发期副产物 (强烈拒绝入库)
+# -------------------------
+# 1. 临时测试代码
+main.py
+debug_bug.py
+pytest.ini
+
+# 2. 学习记录与规划文档
+概览/
+备份.md
+
+# 3. 本地状态与存储 (知识库、测试集、SQLite 记忆)
+data/
+vector_db/
+docs/
+
+# 4. 开发测试脚本 (由于作为开源骨架，目前排除评估逻辑，只留核心 src)
+scripts/
