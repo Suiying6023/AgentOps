@@ -22,7 +22,11 @@ def configure_windows_event_loop() -> None:
     但提前放在启动入口里，后面扩展时不需要再改结构。
     """
     if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        # ⚠️ Phase 12 重要修正: 
+        # 移除了原有的 asyncio.WindowsSelectorEventLoopPolicy()
+        # 因为 FastMCP 启动子进程(stdio)必须依赖原生的 WindowsProactorEventLoopPolicy 来建立管道通信。
+        # 强制设置为 SelectorEventLoop 会导致 MCP 客户端挂载报错 NotImplementedError。
+        pass
 
 
 def main() -> None:

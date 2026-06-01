@@ -42,7 +42,7 @@ npm run dev
 - [x] **存储全面演进**：将 LangGraph Checkpointer 底层也从 SQLite 替换为 PostgreSQL，完成 100% 数据库一统。
 - [x] **工具协议化**：接入了 `FastMCP` 与 `langchain-mcp-adapters`，将系统级工具剥离为独立的 Model Context Protocol 微服务节点。
 - [x] **多智能体协作**：引入 Supervisor 路由中枢，实现多角色 Agent (打分专家、检索专家、闲聊专员) 的协同工作流。
-- [ ] **动态网关与运营面板**：搭建前端 Admin 控制台，支持 API Key 动态下发与成本可视化分析。
+- [ ] **动态网关与运营面板**：搭建前端 Admin 控制台，支持上游模型厂商 (OpenAI/DeepSeek) API Key 的动态管理与网关连通性看板。
 
 ## 许可证
 
