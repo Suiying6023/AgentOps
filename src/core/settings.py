@@ -45,10 +45,27 @@ class Settings(BaseSettings):
     AUTH_SECRET: SecretStr | None = None
     OPENAI_API_KEY: SecretStr | None = None
     DEEPSEEK_API_KEY: SecretStr | None = None
+    GEMAI_API_KEY: SecretStr | None = None
+    GEMAI_BASE_URL: str = "https://api.gemai.cc/v1"
+    GEMAI_RERANKER_MODEL: str = "qwen3-reranker-8b"
+    
+    # 核心组件开关：True 代表使用本地 BGE-M3，False 代表使用在线的 GEMAI Embedding
+    USE_LOCAL_EMBEDDING: bool = False
     
     SILICONFLOW_PRIMARY_KEY: SecretStr
     SILICONFLOW_FALLBACK_KEY: SecretStr
     LANGFUSE_ENABLED: bool = True
+
+    # PostgreSQL 关系与向量数据库配置
+    POSTGRES_HOST: str = "127.0.0.1"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "agentops"
+    POSTGRES_USER: str = "agentops"
+    POSTGRES_PASSWORD: str = "agentops_dev_password"
+
+    @property
+    def postgres_uri(self) -> str:
+        return f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
     # 默认模型设置 (更新为 DeepSeek-V3.2)
     DEFAULT_MODEL: ModelName = SiliconFlowModelName.DEEPSEEK_V3_2
