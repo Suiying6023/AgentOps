@@ -84,7 +84,10 @@ async def invoke_agent(agent_id: str, user_input: UserInput) -> ChatMessage:
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     thread_id = user_input.thread_id or str(uuid4())
-    history = chat_history_store.get_messages(thread_id)
+    
+    from core.lock import ThreadConcurrencyLock
+    async with ThreadConcurrencyLock(thread_id):
+        history = chat_history_store.get_messages(thread_id)
 
     human_message = ChatMessage(
         type="human",
@@ -124,6 +127,12 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
 
     thread_id = user_input.thread_id or str(uuid4())
+    
+    # Phase 11: 提前获取分布式锁，拦截疯狂连击
+    from core.lock import ThreadConcurrencyLock
+    lock = ThreadConcurrencyLock(thread_id)
+    await lock.acquire()
+
     history = chat_history_store.get_messages(thread_id)
 
     human_message = ChatMessage(
@@ -139,53 +148,58 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
     chat_history_store.append_messages(thread_id, [human_message])
 
     async def generate():
-        reply_chunks = []
-        run_id = str(uuid4())
-        
-        # 🚀 并发启动异步大模型裁判（不阻塞主流程！）
-        judge_task = asyncio.create_task(judge_injection_async(user_input.message))
-        is_blocked = False
-        
-        # 实时监听大模型的输出
-        async for chunk in agent.invoke(user_input, history):
-            # 🧨 每次主模型吐字时，顺便看一眼裁判有没有吹哨
-            if judge_task.done():
-                try:
-                    is_malicious = judge_task.result()
-                except Exception:
-                    is_malicious = False
-                
-                if is_malicious:
-                    warning_msg = "\n\n🚨 **[安全系统接管] 裁判模型检测到恶意注入尝试，您的连接已被强制熔断！**"
-                    if user_input.stream_tokens:
-                        yield f"data: {json.dumps({'type': 'token', 'content': warning_msg}, ensure_ascii=False)}\n\n"
-                    reply_chunks.append(warning_msg)
-                    is_blocked = True
-                    break  # 强制熔断流！
-
-            reply_chunks.append(chunk)
+        try:
+            reply_chunks = []
+            run_id = str(uuid4())
             
-            # 严格按照 SSE 规范往外吐数据
-            if user_input.stream_tokens:
-                yield f"data: {json.dumps({'type': 'token', 'content': chunk}, ensure_ascii=False)}\n\n"
-        
-        # 如果循环结束，且裁判还没返回（比如用户输入非常短，主模型秒回了），我们不再强等裁判。
-        # 真实环境中这里可能还会做后置记录或告警。
-        reply_text = "".join(reply_chunks)
-        ai_message = ChatMessage(
-            type="ai",
-            content=reply_text,
-            run_id=run_id,
-            metadata={
-                "agent_id": agent_id,
-                "thread_id": thread_id,
-                "user_id": user_input.user_id,
-            },
-        )
-        chat_history_store.append_messages(thread_id, [ai_message])
-        
-        # 发送结束信号，通知前端断开连接
-        yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
+            # 🚀 并发启动异步大模型裁判（不阻塞主流程！）
+            judge_task = asyncio.create_task(judge_injection_async(user_input.message))
+            is_blocked = False
+            
+            # 实时监听大模型的输出
+            async for chunk in agent.invoke(user_input, history):
+                # 🧨 每次主模型吐字时，顺便看一眼裁判有没有吹哨
+                if judge_task.done():
+                    try:
+                        is_malicious = judge_task.result()
+                    except Exception:
+                        is_malicious = False
+                    
+                    if is_malicious:
+                        warning_msg = "\n\n🚨 **[安全系统接管] 裁判模型检测到恶意注入尝试，您的连接已被强制熔断！**"
+                        if user_input.stream_tokens:
+                            yield f"data: {json.dumps({'type': 'token', 'content': warning_msg}, ensure_ascii=False)}\n\n"
+                        reply_chunks.append(warning_msg)
+                        is_blocked = True
+                        break  # 强制熔断流！
+
+                reply_chunks.append(chunk)
+                
+                # 严格按照 SSE 规范往外吐数据
+                if user_input.stream_tokens:
+                    yield f"data: {json.dumps({'type': 'token', 'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            # 如果循环结束，且裁判还没返回（比如用户输入非常短，主模型秒回了），我们不再强等裁判。
+            # 真实环境中这里可能还会做后置记录或告警。
+            reply_text = "".join(reply_chunks)
+            ai_message = ChatMessage(
+                type="ai",
+                content=reply_text,
+                run_id=run_id,
+                metadata={
+                    "agent_id": agent_id,
+                    "thread_id": thread_id,
+                    "user_id": user_input.user_id,
+                },
+            )
+            chat_history_store.append_messages(thread_id, [ai_message])
+            
+            # 发送结束信号，通知前端断开连接
+            yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
+
+        finally:
+            # 必须释放锁，否则会锁死该会话！
+            await lock.release()
 
     # 使用 FastAPI 内置的 StreamingResponse 返回生成器
     return StreamingResponse(generate(), media_type="text/event-stream")

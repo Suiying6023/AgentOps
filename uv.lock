@@ -34,6 +34,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic-settings" },
     { name = "ragas" },
+    { name = "redis" },
     { name = "sentence-transformers" },
     { name = "uvicorn" },
 ]
@@ -63,6 +64,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=24.0.0" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "ragas", specifier = ">=0.4.3" },
+    { name = "redis", specifier = ">=8.0.0" },
     { name = "sentence-transformers", specifier = ">=5.5.1" },
     { name = "uvicorn", specifier = ">=0.48.0" },
 ]
@@ -3033,6 +3035,15 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d2/bc/3234517692ac0ffae1ec2ec940992e4057844c49ee6c51c07ce385bb98f1/ragas-0.4.3.tar.gz", hash = "sha256:1eb1f61dbc8613ad014fdb8d630cbe9a1caec1ea01664a106993cb756128c001", size = 44029626, upload-time = "2026-01-13T17:48:01.043Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4d/e0/1fecd22c93d3ed66453cbbdefd05528331af4d33b2b76a370d751231912c/ragas-0.4.3-py3-none-any.whl", hash = "sha256:ef1d75f674c294e9a6e7d8e9ad261b6bf4697dad1c9cbd1a756ba7a6b4849a38", size = 466452, upload-time = "2026-01-13T17:47:59.2Z" },
+]
+
+[[package]]
+name = "redis"
+version = "8.0.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/53/ae/ed461cca5780b5fc8b9fe8ca0ed98d89508645fb9d880c24cc42c087678f/redis-8.0.0.tar.gz", hash = "sha256:a00c5355432051ac14e593b8b197fc76c887ee12d55a0984f69328a1115fdc49", size = 5101591, upload-time = "2026-05-28T12:45:13.5Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/27/e3/b519734372d305bd547534a9f32e4ce9f98552af753dce72cf3483a0ff0b/redis-8.0.0-py3-none-any.whl", hash = "sha256:c938c18338585009f0bc310f4c7e4e4b4d37639356c4ac072cedf3af570c8dc7", size = 499870, upload-time = "2026-05-28T12:45:11.697Z" },
 ]
 
 [[package]]

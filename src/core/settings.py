@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     def postgres_uri(self) -> str:
         return f"postgresql+psycopg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
+    # Redis 配置 (用于并发锁控制)
+    REDIS_HOST: str = "127.0.0.1"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str | None = None
+
+    @property
+    def redis_uri(self) -> str:
+        if self.REDIS_PASSWORD:
+            return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+
     # 默认模型设置 (更新为 DeepSeek-V3.2)
     DEFAULT_MODEL: ModelName = SiliconFlowModelName.DEEPSEEK_V3_2
     def is_dev(self) -> bool:

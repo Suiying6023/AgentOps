@@ -38,7 +38,7 @@ npm run dev
 
 ## 未来演进路线 (Roadmap & TODO)
 
-- [ ] **并发锁机制 (Next)**：引入 `asyncio.Lock` 或 PostgreSQL Advisory Lock，解决高并发下的状态冲突与竞争问题。
+- [x] **并发分布式锁**：接入原生 Redis，引入 `ThreadConcurrencyLock`，完美拦截同会话的高并发连击，解决状态冲突与竞争问题。
 - [x] **存储全面演进**：将 LangGraph Checkpointer 底层也从 SQLite 替换为 PostgreSQL，完成 100% 数据库一统。
 - [ ] **工具协议化**：剥离耦合，将知识库检索等工具封装为独立的 FastMCP 微服务节点。
 - [ ] **多智能体协作**：引入 Supervisor 路由中枢，实现多角色 Agent (打分专家、检索专家、闲聊专员) 的协同工作流。
