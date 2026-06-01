@@ -36,47 +36,79 @@ class GraphAgent(BaseAgent):
         super().__init__()
 
     def _build_graph(self, memory_saver, tools: list):
+        from langgraph.types import Command
+        from langgraph.prebuilt import create_react_agent
+        from langchain_core.messages import SystemMessage
+
         # 实例化图画板，并绑定我们定义好的 State
         workflow = StateGraph(AgentState)
 
-        # 4. 初始化工具节点
-        # ToolNode 是 LangGraph 预置的节点，专门用来执行模型请求调用的工具
-        tool_node = ToolNode(tools)
+        # ---------------------------------------------------------
+        # Phase 12: 多智能体 (Multi-Agent) 路由主管架构
+        # ---------------------------------------------------------
+        
+        # 1. 定义主管用来分发任务的虚拟工具
+        @tool
+        def transfer_to_researcher():
+            """当遇到需要查询知识库、内部文档、或者查天气的需求时，必须调用此工具将任务移交给研究专员(Researcher)。"""
+            pass
 
-        # 5. 定义图中的“模型节点” (Node)
-        async def call_model(state: AgentState):
-            """大模型推理节点"""
-            # 从状态里读取需要用的参数
+        # 2. 初始化 Researcher 子图 (Sub-Agent)
+        # 这是标准的 Manager-Worker 模式，Researcher 本身是一个具备 MCP 工具的 ReAct 闭环
+        researcher_model = get_model() # 搬砖智能体默认使用快速主力模型
+        researcher_agent = create_react_agent(
+            researcher_model,
+            tools=tools,
+            state_modifier=SystemMessage(content="你是资深的调研专员(Researcher)。你有权限使用外部 MCP 微服务工具来检索信息和获取天气。拿到数据后，请直接向用户输出客观、精炼的事实总结，不要废话。")
+        )
+
+        async def researcher_node(state: AgentState) -> Command:
+            """调研专员节点"""
+            # 将主状态的对话历史透传给子图执行
+            result = await researcher_agent.ainvoke({"messages": state["messages"]})
+            # 仅提取子图中新生成的回复或工具日志，避免历史重复
+            new_messages = result["messages"][len(state["messages"]):]
+            # 执行完毕后，命令流控交还给主管进行审查
+            return Command(
+                goto="supervisor",
+                update={"messages": new_messages}
+            )
+
+        # 3. 初始化 Supervisor 主管节点
+        async def supervisor_node(state: AgentState) -> Command:
+            """中枢路由主管节点"""
             messages = state["messages"]
             model_name = state.get("model_name")
             
-            # 向模型工厂申请带有容灾兜底的大模型实例，并“绑定”工具
-            # bind_tools 会告诉模型：你可以使用这些工具，模型判断需要时会返回包含 tool_calls 的特殊消息
-            model = get_model(model_name).bind_tools(tools)
+            # 主管挂载转移工具，并且只看最后几轮对话避免被干扰
+            supervisor_model = get_model(model_name).bind_tools([transfer_to_researcher])
+            sys_msg = SystemMessage(content="""你是系统的大管家(Supervisor)。
+如果用户向你提问涉及实时天气、专业知识、内部档按等需要检索的数据，你必须立即调用 transfer_to_researcher 工具。
+如果用户只是在和你闲聊，或者 researcher 已经回答了用户的问题，请选择合适的话语直接回复用户。""")
             
-            # 触发模型思考 (注意：在 LangGraph 中，我们写 ainvoke，但外层仍然可以截获流式！)
-            response = await model.ainvoke(messages)
+            response = await supervisor_model.ainvoke([sys_msg] + messages)
             
-            # 返回的结果会被 LangGraph 根据我们在 AgentState 中定义的规则更新到全局状态中
-            return {"messages": [response]}
+            # 如果主管决定委派任务
+            if response.tool_calls and response.tool_calls[0]["name"] == "transfer_to_researcher":
+                # 注意：为了让 Researcher 能看到用户最原始的问题，我们这里不把带有 tool_call 的 response 存入状态，而是直接进行跳转
+                return Command(goto="researcher")
+                
+            # 如果主管决定亲自回答（包含寒暄或结语）
+            return Command(
+                goto=END,
+                update={"messages": [response]}
+            )
 
-        # 6. 把节点添加到画板上
-        workflow.add_node("call_model", call_model)
-        workflow.add_node("tools", tool_node)  # 添加工具执行节点
+        # ---------------------------------------------------------
+        # 构建拓扑结构
+        # ---------------------------------------------------------
+        workflow.add_node("supervisor", supervisor_node)
+        workflow.add_node("researcher", researcher_node)
 
-        # 7. 画“边线” (Edge)，定义流程怎么走 (ReAct 循环)
-        workflow.add_edge(START, "call_model")
-        
-        # 条件边：模型节点结束后，判断是否需要调用工具
-        workflow.add_conditional_edges(
-            "call_model",
-            tools_condition,  # 预置条件判断：如果有 tool_calls 则流向 "tools" 节点，否则流向 END
-        )
-        
-        # 闭环：从工具节点回到模型节点，让模型根据工具执行的观察结果继续思考
-        workflow.add_edge("tools", "call_model")
+        # 起始入口始终是主管
+        workflow.add_edge(START, "supervisor")
 
-        # 8. 编译出炉 (挂载 Checkpointer 还原历史状态)
+        # 编译出炉 (挂载 Checkpointer 还原历史状态)
         return workflow.compile(checkpointer=memory_saver)
 
     async def invoke(
