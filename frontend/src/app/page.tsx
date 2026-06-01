@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Bot, User, Wrench, Clock, Cpu, MessageSquare, Plus, ChevronDown } from "lucide-react";
+import { Send, Sparkles, Bot, User, Wrench, Clock, Cpu, MessageSquare, Plus, ChevronDown, Paperclip, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -33,8 +33,10 @@ export default function Chat() {
   const [threads, setThreads] = useState<string[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   useEffect(() => {
     if (scrollRef.current) {
@@ -76,6 +78,34 @@ export default function Chat() {
   const startNewThread = () => {
     setCurrentThreadId(null);
     setMessages([]);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("http://localhost:8080/knowledge/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("📚 上传与解析成功！\\n该文档现已切片并进入 PGVector 向量库，研究专员 (Researcher) 可以根据需要随时查阅了。");
+      } else {
+        alert("上传失败：" + data.detail);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("上传失败，请检查网络连接");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -343,19 +373,36 @@ export default function Chat() {
 
         <footer className="p-6 bg-white border-t border-gray-100">
           <div className="mx-auto max-w-3xl">
-            <form onSubmit={handleSubmit} className="relative group">
+            <form onSubmit={handleSubmit} className="relative group flex items-center">
+              <input
+                type="file"
+                className="hidden"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".txt,.md,.pdf"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isTyping || isUploading}
+                className="absolute left-2 p-2.5 text-gray-400 hover:text-black transition-colors disabled:opacity-50 z-10"
+                title="上传 PDF 或 TXT/MD 供研究专员分析"
+              >
+                {isUploading ? <Loader2 size={18} className="animate-spin text-black" /> : <Paperclip size={18} />}
+              </button>
+              
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="发送指令给主脑 Supervisor..."
-                disabled={isTyping}
-                className="w-full px-5 py-4 focus:outline-none transition-all disabled:opacity-50 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 text-[15px] focus:bg-white focus:ring-1 focus:ring-black"
+                placeholder="发送指令给主脑 Supervisor... (点击左侧附件可上传资料)"
+                disabled={isTyping || isUploading}
+                className="w-full pl-12 pr-12 py-4 focus:outline-none transition-all disabled:opacity-50 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 text-[15px] focus:bg-white focus:ring-1 focus:ring-black"
               />
               <button
                 type="submit"
-                disabled={isTyping || !input.trim()}
-                className="absolute p-2.5 transition-colors disabled:opacity-50 right-2 top-2 bg-black text-white rounded-lg hover:bg-gray-800"
+                disabled={isTyping || !input.trim() || isUploading}
+                className="absolute p-2.5 transition-colors disabled:opacity-50 right-2 bg-black text-white rounded-lg hover:bg-gray-800"
               >
                 <Send size={18} />
               </button>

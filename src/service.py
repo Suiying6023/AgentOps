@@ -260,4 +260,34 @@ async def remove_provider(provider: str):
     delete_provider(provider)
     return {"status": "success"}
 
+# ==========================================
+# Phase 9 & 13: 文档知识库解析与切分 (Agentic RAG)
+# ==========================================
+from fastapi import UploadFile, File
+import shutil
+import os
+
+@protected_router.post("/knowledge/upload")
+async def upload_knowledge(file: UploadFile = File(...)):
+    """上传文件并触发后端的自动解析、切片与向量入库"""
+    upload_dir = "data/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, file.filename)
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    try:
+        from tools.rag import ingest_document
+        import asyncio
+        # 将同步的阻塞任务放到线程池执行，避免卡死主事件循环
+        await asyncio.to_thread(ingest_document, file_path)
+        return {"status": "success", "message": f"文件 {file.filename} 已成功解析、切片并存入 Postgres 向量库！"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件处理失败: {str(e)}")
+    finally:
+        # 入库完成后清理临时文件
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 app.include_router(protected_router)
