@@ -30,8 +30,12 @@ frontend/*.tsbuildinfo
 # -------------------------
 # 1. 临时测试代码
 main.py
-debug_bug.py
+debug_*.py
+test_*.py
+check_*.py
 pytest.ini
+sig.txt
+tests/
 
 # 2. 学习记录与规划文档
 概览/
