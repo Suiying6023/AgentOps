@@ -19,7 +19,7 @@ type Message = {
 // 后端支持的模型列表
 const AVAILABLE_MODELS = [
   { id: "", name: "系统默认" },
-  { id: "deepseek-chat", name: "DeepSeek V3 (极速)" },
+  { id: "deepseek-chat", name: "DeepSeek V3" },
   { id: "deepseek-reasoner", name: "DeepSeek R1 (深思)" },
   { id: "gpt-4o", name: "GPT-4o (全能)" },
   { id: "gpt-4o-mini", name: "GPT-4o Mini (轻量)" },
@@ -336,9 +336,9 @@ export default function Chat() {
                                             );
                                         } else {
                                             return (
-                                                <div key={idx} className="prose prose-gray max-w-none prose-p:leading-relaxed prose-pre:rounded-lg prose-pre:bg-gray-100 prose-pre:text-gray-900 prose-pre:border prose-pre:border-gray-200 text-[15px]">
+                                                <div key={idx} className="prose prose-slate max-w-none leading-relaxed text-[15px] text-gray-800 prose-p:m-0 prose-p:mb-1.5 prose-headings:m-0 prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-ul:m-0 prose-ul:mb-1.5 prose-ul:pl-5 prose-ol:m-0 prose-ol:mb-1.5 prose-ol:pl-5 prose-li:m-0 prose-li:mb-0.5 prose-code:px-1.5 prose-code:py-0.5 prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:rounded-md prose-code:before:content-none prose-code:after:content-none prose-pre:my-2 prose-pre:rounded-lg prose-pre:bg-gray-50 prose-pre:text-gray-900 prose-pre:border prose-pre:border-gray-200 prose-strong:font-semibold prose-strong:text-gray-900 prose-table:w-full prose-table:border-collapse prose-th:border prose-th:border-gray-200 prose-th:bg-gray-50 prose-th:px-3 prose-th:py-2 prose-td:border prose-td:border-gray-200 prose-td:px-3 prose-td:py-2">
                                                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                                        {part}
+                                                        {part.replace(/\n{3,}/g, '\n\n')}
                                                     </ReactMarkdown>
                                                 </div>
                                             );
@@ -381,9 +381,8 @@ export default function Chat() {
                 className="hidden"
                 ref={fileInputRef}
                 onChange={(e) => {
-                  // 这里用个极简的 Trick：如果 accept 包含了 pdf，我们默认当作 RAG 传。如果是 markdown，走 Wiki。
-                  // 为了更优雅，我们直接分两个触发入口。
-                  // 但目前 ref 只有一个，所以在下面改用了两个 onClick，配合一个状态。
+                  // 区分不同文件类型的上传接口
+                  // 目前共用一个 ref，通过记录上传类型状态来区分调用
                 }}
                 accept=".txt,.md,.pdf"
               />

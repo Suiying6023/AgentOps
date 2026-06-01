@@ -24,8 +24,8 @@ def search_knowledge(query: str) -> str:
 
 @mcp.tool()
 def search_compiled_wiki(query: str) -> str:
-    """【实验功能】当你被明确要求搜索“维基”、“精华知识”或你需要获取高度提炼的结构化实体信息时，必须调用此工具。
-    它会遍历并读取经过后台 LLM 深度编译后的完整 Markdown 页面，而不是零碎的切片片段。
+    """专门用来搜索由 AI 预编译生成的结构化 Wiki 知识库（即 LLMWiki 模式）。
+    支持整句自然语言语义检索，引擎会自动通过 VectorDB 寻址并返回最相关的整篇 Wiki 文档。
     """
     try:
         from tools.wiki_compiler import search_llm_wiki
@@ -40,7 +40,7 @@ def get_current_weather(city: str) -> str:
     try:
         return get_weather.invoke({"city": city})
     except Exception as e:
-        # 异常原样抛出，以便利用 LangGraph 的纠错机制
+        # 异常原样抛出供模型重试
         return str(e)
 
 if __name__ == "__main__":

@@ -16,14 +16,12 @@ from agents.base import BaseAgent
 from core.llm import get_model
 from schema import ChatMessage, UserInput
 
-# 这里原本是静态导入本地 tool，现在我们准备全面拥抱 MCP
-# 我们将会在 invoke 时动态挂载外部的微服务工具。
+# 动态挂载外部的微服务工具。
 
 
-# 2. 定义图的“状态” (State)
-# State 是图流转过程中的“全局白板”。所有节点都会读取并修改这个白板。
+# 2. 定义图的状态 (State)
 class AgentState(TypedDict):
-    # Annotated 与 add_messages：表示这不只是一个简单的列表替换，而是遇到新消息时“追加”进去
+    # 消息追加机制
     messages: Annotated[list[BaseMessage], add_messages]
     # 我们把用户选择的模型名也放进状态里，供后续的 Node 读取
     model_name: str
@@ -32,117 +30,83 @@ class AgentState(TypedDict):
 
 
 class GraphAgent(BaseAgent):
-    """基于 LangGraph 编排的智能体 (Phase 4 引入 ReAct 工具调用核心)。"""
+    """基于 LangGraph 编排的智能体"""
 
     def __init__(self):
         super().__init__()
 
     def _build_graph(self, memory_saver, tools: list):
         from langgraph.types import Command
-        from langgraph.prebuilt import create_react_agent
-        from langchain_core.messages import SystemMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from pydantic import BaseModel, Field
 
-        # 实例化图画板，并绑定我们定义好的 State
         workflow = StateGraph(AgentState)
 
-        # ---------------------------------------------------------
-        # Phase 12: 多智能体 (Multi-Agent) 路由主管架构
-        # ---------------------------------------------------------
-        
-        # 1. 定义主管用来分发任务的虚拟工具，新增复杂度参数
-        from pydantic import BaseModel, Field
-        
-        class TransferArgs(BaseModel):
+
+        class SubagentArgs(BaseModel):
+            task: str = Field(description="子智能体需要执行的具体任务指令")
             complexity: Literal["simple", "complex"] = Field(
                 default="simple",
-                description="任务复杂度。如果只是查天气或单一事实核查，填 'simple'；如果需要阅读多份长文档并进行深度逻辑推理，填 'complex'。"
+                description="任务复杂度。简单查询填 'simple'，复杂推理填 'complex'。"
             )
 
-        @tool(args_schema=TransferArgs)
-        def transfer_to_researcher(complexity: str):
-            """当遇到需要查询知识库、内部文档、或者查天气的需求时，必须调用此工具将任务移交给研究专员(Researcher)。"""
-            pass
-
-        async def researcher_node(state: AgentState) -> Command:
-            """调研专员节点 (支持动态模型切换)"""
+        @tool(args_schema=SubagentArgs)
+        async def create_subagent(task: str, complexity: str) -> str:
+            """创建一个独立的后台子智能体来处理特定任务（如耗时检索、深入推理、并行子任务），并返回其执行结果报告。"""
+            from langgraph.prebuilt import create_react_agent
             
-            # 🌟 核心突破：让子节点在运行时动态读取主管派发的复杂度，当场生成专属 Agent！
-            complexity = state.get("subagent_complexity", "simple")
+            sub_model_name = "deepseek-ai/DeepSeek-R1" if complexity == "complex" else "deepseek-ai/DeepSeek-V3.2"
+            sub_model = get_model(sub_model_name)
             
-            if complexity == "complex":
-                # 复杂推理使用最强模型 (比如 GPT-4o 或 DeepSeek-R1 等)
-                # 这里为了兼容我们在 schema.py 里的配置，使用 gpt-4o 或对应的旗舰模型
-                sub_model_name = "deepseek-reasoner"  # 或任何贵/强的模型
-                print("[系统日志] 🧠 触发高智商深思模式 (Complex) ->", sub_model_name)
-            else:
-                # 简单查询使用极速模型，省钱且快
-                sub_model_name = "deepseek-chat"
-                print("[系统日志] ⚡ 触发极速搬砖模式 (Simple) ->", sub_model_name)
-                
-            researcher_model = get_model(sub_model_name)
-            researcher_agent = create_react_agent(
-                researcher_model,
+            sub_agent = create_react_agent(
+                sub_model,
                 tools=tools,
-                state_modifier=SystemMessage(content="你是资深的调研专员(Researcher)。你有权限使用外部 MCP 微服务工具来检索信息和获取天气。拿到数据后，请直接向用户输出客观、精炼的事实总结，不要废话。")
+                prompt=SystemMessage(content="你是后台子智能体。请使用工具执行分配给你的任务，并返回客观的事实结果。排版要求紧凑，严禁在非必要情况下使用空行！")
             )
             
-            # 将主状态的对话历史透传给子图执行
-            result = await researcher_agent.ainvoke({"messages": state["messages"]})
-            # 仅提取子图中新生成的回复或工具日志，避免历史重复
-            new_messages = result["messages"][len(state["messages"]):]
-            # 执行完毕后，命令流控交还给主管进行审查
-            return Command(
-                goto="supervisor",
-                update={"messages": new_messages}
+            print(f"[系统日志] 派生后台子智能体 (模型: {sub_model_name}) 任务: {task[:30]}...", file=sys.stderr)
+            # 给子智能体分配全新的空白状态流执行任务，并打上特殊 tag 以便在外层进行事件拦截
+            result = await sub_agent.ainvoke(
+                {"messages": [HumanMessage(content=task)]},
+                config={"tags": ["subagent_run"]}
             )
+            
+            return f"【子智能体汇报】:\n{result['messages'][-1].content}"
 
-        # 3. 初始化 Supervisor 主管节点
-        async def supervisor_node(state: AgentState) -> Command:
-            """中枢路由主管节点"""
-            messages = state["messages"]
+        # 把创建 Subagent 的能力作为工具，与物理工具一并装载
+        all_tools = tools + [create_subagent]
+
+        # 1. 主模型推理节点
+        async def agent_node(state: AgentState):
             model_name = state.get("model_name")
+            model = get_model(model_name).bind_tools(all_tools)
             
-            # 主管挂载转移工具，并且只看最后几轮对话避免被干扰
-            supervisor_model = get_model(model_name).bind_tools([transfer_to_researcher])
-            sys_msg = SystemMessage(content="""你是系统的大管家(Supervisor)。
-如果用户向你提问涉及实时天气、专业知识、内部档按等需要检索的数据，你必须立即调用 transfer_to_researcher 工具。
-如果用户只是在和你闲聊，或者 researcher 已经回答了用户的问题，请选择合适的话语直接回复用户。""")
+            sys_msg = SystemMessage(content="""你是主智能体 AgentOps。
+拥有外部 MCP 微服务工具调用权限，直接解答用户问题。
+【机制】：遇到多任务、长推理或并行探索需求时，请调用 create_subagent 工具创建子智能体进行后台处理，并基于其汇报生成总结。
+【排版】：排版保持极致紧凑，段落与列表间最多保留一个换行符，严禁在非必要情况下使用空行！""")
             
-            response = await supervisor_model.ainvoke([sys_msg] + messages)
-            
-            # 如果主管决定委派任务
-            if response.tool_calls and response.tool_calls[0]["name"] == "transfer_to_researcher":
-                # 获取主管评估的复杂度
-                complexity = response.tool_calls[0]["args"].get("complexity", "simple")
-                
-                # 注意：为了让 Researcher 能看到用户最原始的问题，我们这里不把带有 tool_call 的 response 存入状态，而是直接进行跳转
-                return Command(
-                    goto="researcher",
-                    update={"subagent_complexity": complexity}
-                )
-                
-            # 如果主管决定亲自回答（包含寒暄或结语）
-            return Command(
-                goto=END,
-                update={"messages": [response]}
-            )
+            response = await model.ainvoke([sys_msg] + state["messages"])
+            return {"messages": [response]}
 
-        # ---------------------------------------------------------
+        # 2. 工具执行节点
+        tool_node = ToolNode(all_tools)
+
         # 构建拓扑结构
-        # ---------------------------------------------------------
-        workflow.add_node("supervisor", supervisor_node)
-        workflow.add_node("researcher", researcher_node)
+        workflow.add_node("agent", agent_node)
+        workflow.add_node("tools", tool_node)
 
-        # 起始入口始终是主管
-        workflow.add_edge(START, "supervisor")
+        workflow.add_edge(START, "agent")
+        # 如果模型调用了工具，则走向 tools；如果没调，则走向 END
+        workflow.add_conditional_edges("agent", tools_condition)
+        workflow.add_edge("tools", "agent")
 
-        # 编译出炉 (挂载 Checkpointer 还原历史状态)
         return workflow.compile(checkpointer=memory_saver)
 
     async def invoke(
         self, user_input: UserInput, history: list[ChatMessage] = None
     ) -> AsyncGenerator[str, None]:
-        """执行图流转，并接管底层的流式输出事件。"""
+        """执行图流转并输出流式结果"""
 
         # 构建图流转的初始数据
         inputs = {
@@ -150,7 +114,7 @@ class GraphAgent(BaseAgent):
             "model_name": user_input.model,
         }
         
-        # Phase 7: Langfuse 监控接入与 Thread ID 注入
+        # Langfuse 监控接入与 Thread ID 注入
         from core.settings import settings
         
         callbacks = []
@@ -172,10 +136,10 @@ class GraphAgent(BaseAgent):
         }
 
 
-        # 动态编译，将数据库完全切换至企业级的 PostgreSQL
+        # 配置 PostgreSQL URI
         postgres_uri = settings.postgres_uri.replace("+psycopg", "")
         
-        # 🌟 Phase 12: 动态拉取外部的 MCP 微服务工具
+        # 动态拉取外部 MCP 工具
         from core.mcp_client import get_mcp_tools
         mcp_tools = await get_mcp_tools()
         
@@ -184,20 +148,29 @@ class GraphAgent(BaseAgent):
             await memory_saver.setup()
             graph = self._build_graph(memory_saver, mcp_tools)
             
-            # 见证奇迹的时刻：astream_events 可以深入到图的毛细血管里
-            # 把图内部大模型的“逐字流事件”给直接截获出来！
+            # 截获模型内部生成的事件流
             async for event in graph.astream_events(inputs, config=config, version="v2"):
                 kind = event["event"]
+                tags = event.get("tags", [])
+                
                 if kind == "on_chat_model_stream":
-                    # 提取大模型刚刚吐出的碎片文字
+                    # 屏蔽子智能体内部的自言自语（防止在前端和主模型的话重复），仅透传主智能体
+                    if "subagent_run" in tags:
+                        continue
+                        
                     chunk_content = event["data"]["chunk"].content
                     if chunk_content:
                         yield str(chunk_content)
                 elif kind == "on_tool_start":
-                    # 截获工具开始调用事件
                     tool_name = event["name"]
                     tool_input = event["data"].get("input", {})
-                    yield f"\n\n> ⚙️ **[系统日志] 正在调用工具**: `{tool_name}`\n> **参数**: `{tool_input}`\n\n"
+                    
+                    if "subagent_run" in tags:
+                        yield f"\n\n> ⚙️ [子进程] 调用工具: `{tool_name}`\n\n"
+                    else:
+                        yield f"\n\n> ⚙️ [主进程] 调用工具: `{tool_name}`\n> 参数: `{tool_input}`\n\n"
                 elif kind == "on_tool_end":
-                    # 截获工具结束事件
-                    yield f"> ✅ **[系统日志] 工具执行完毕**\n\n"
+                    if "subagent_run" in tags:
+                        yield f"> ✓ [子进程] 执行完毕\n\n"
+                    else:
+                        yield f"> ✓ [主进程] 执行完毕\n\n"

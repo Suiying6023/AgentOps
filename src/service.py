@@ -23,14 +23,17 @@ from schema import (
 )
 
 
-app = FastAPI(title="My Agent Service")
+from contextlib import asynccontextmanager
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     from core.config_manager import init_db, load_configs
-    # 初始化动态网关的 PostgreSQL 表并热加载到内存
+    # 初始化配置表并加载
     init_db()
     load_configs()
+    yield
+
+app = FastAPI(title="My Agent Service", lifespan=lifespan)
 
 
 # 允许跨域，方便 Next.js 前端调用
@@ -136,7 +139,7 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
 
     thread_id = user_input.thread_id or str(uuid4())
     
-    # Phase 11: 提前获取分布式锁，拦截疯狂连击
+    # 获取分布式锁，防止并发冲突
     from core.lock import ThreadConcurrencyLock
     lock = ThreadConcurrencyLock(thread_id)
     await lock.acquire()
@@ -152,7 +155,7 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
             "user_id": user_input.user_id,
         },
     )
-    # 因为要流式返回，我们先把人类的问题存进记忆里
+    # 流式返回前记录人类消息
     chat_history_store.append_messages(thread_id, [human_message])
 
     async def generate():
@@ -160,13 +163,13 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
             reply_chunks = []
             run_id = str(uuid4())
             
-            # 🚀 并发启动异步大模型裁判（不阻塞主流程！）
+            # 启动异步安全检测
             judge_task = asyncio.create_task(judge_injection_async(user_input.message))
             is_blocked = False
             
-            # 实时监听大模型的输出
+            # 流式输出
             async for chunk in agent.invoke(user_input, history):
-                # 🧨 每次主模型吐字时，顺便看一眼裁判有没有吹哨
+                # 检查安全拦截结果
                 if judge_task.done():
                     try:
                         is_malicious = judge_task.result()
@@ -174,12 +177,12 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
                         is_malicious = False
                     
                     if is_malicious:
-                        warning_msg = "\n\n🚨 **[安全系统接管] 裁判模型检测到恶意注入尝试，您的连接已被强制熔断！**"
+                        warning_msg = "\n\n🚨 **[安全拦截] 检测到恶意注入，连接已断开**"
                         if user_input.stream_tokens:
                             yield f"data: {json.dumps({'type': 'token', 'content': warning_msg}, ensure_ascii=False)}\n\n"
                         reply_chunks.append(warning_msg)
                         is_blocked = True
-                        break  # 强制熔断流！
+                        break  # 中断流
 
                 reply_chunks.append(chunk)
                 
@@ -187,8 +190,7 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
                 if user_input.stream_tokens:
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk}, ensure_ascii=False)}\n\n"
             
-            # 如果循环结束，且裁判还没返回（比如用户输入非常短，主模型秒回了），我们不再强等裁判。
-            # 真实环境中这里可能还会做后置记录或告警。
+            # 结束生成
             reply_text = "".join(reply_chunks)
             ai_message = ChatMessage(
                 type="ai",
@@ -206,7 +208,7 @@ async def stream_agent(agent_id: str, user_input: StreamInput):
             yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
 
         finally:
-            # 必须释放锁，否则会锁死该会话！
+            # 释放锁
             await lock.release()
 
     # 使用 FastAPI 内置的 StreamingResponse 返回生成器
@@ -263,13 +265,13 @@ async def remove_provider(provider: str):
 # ==========================================
 # Phase 9 & 13: 文档知识库解析与切分 (Agentic RAG)
 # ==========================================
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, BackgroundTasks
 import shutil
 import os
 
 @protected_router.post("/knowledge/upload")
-async def upload_knowledge(file: UploadFile = File(...)):
-    """传统的 RAG 向量化切片上传 (常规路线)"""
+async def upload_knowledge(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """RAG 向量库上传解析"""
     upload_dir = "data/uploads"
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, file.filename)
@@ -277,19 +279,23 @@ async def upload_knowledge(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    try:
-        from tools.rag import ingest_document
-        import asyncio
-        await asyncio.to_thread(ingest_document, file_path)
-        return {"status": "success", "message": f"文件 {file.filename} 已成功存入常规 RAG 向量库。"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(file_path): os.remove(file_path)
+    def process_rag_doc(path: str, filename: str):
+        try:
+            from tools.rag import ingest_document
+            ingest_document(path)
+            print(f"[后台任务] 文件 {filename} 解析并灌库成功！")
+        except Exception as e:
+            print(f"[后台任务] 文件 {filename} 灌库失败: {e}")
+        finally:
+            if os.path.exists(path): os.remove(path)
+
+    # 提交到后台线程池处理，绝不阻塞主线程
+    background_tasks.add_task(process_rag_doc, file_path, file.filename)
+    return {"status": "success", "message": f"文件 {file.filename} 已进入后台队列，系统正在安静为您灌库，您可继续聊天！"}
 
 @protected_router.post("/knowledge/upload_wiki")
-async def upload_wiki(file: UploadFile = File(...)):
-    """前沿的 LLM Wiki 架构上传 (大模型直接通读并编译为双链 Markdown)"""
+async def upload_wiki(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Wiki 知识编译上传"""
     upload_dir = "data/uploads_wiki"
     os.makedirs(upload_dir, exist_ok=True)
     file_path = os.path.join(upload_dir, file.filename)
@@ -297,14 +303,17 @@ async def upload_wiki(file: UploadFile = File(...)):
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    try:
-        from tools.wiki_compiler import compile_document_to_wiki
-        import asyncio
-        await asyncio.to_thread(compile_document_to_wiki, file_path)
-        return {"status": "success", "message": f"文件 {file.filename} 已成功编译为 Wiki 页面。"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if os.path.exists(file_path): os.remove(file_path)
+    def process_wiki_doc(path: str, filename: str):
+        try:
+            from tools.wiki_compiler import compile_document_to_wiki
+            compile_document_to_wiki(path)
+            print(f"[后台任务] 文件 {filename} Wiki 编译成功！")
+        except Exception as e:
+            print(f"[后台任务] 文件 {filename} Wiki 编译失败: {e}")
+        finally:
+            if os.path.exists(path): os.remove(path)
+
+    background_tasks.add_task(process_wiki_doc, file_path, file.filename)
+    return {"status": "success", "message": f"文件 {file.filename} 已进入后台 Wiki 编译队列，大模型正在通读，您可继续聊天！"}
 
 app.include_router(protected_router)

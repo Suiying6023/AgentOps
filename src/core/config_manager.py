@@ -5,7 +5,7 @@ from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# 内存缓存，保证 get_model() 是极速的，且不用写恶心的 sync->async 转换
+# 内存缓存，降低 get_model() 耗时并简化同步调用
 PROVIDER_CACHE = {}
 
 def init_db():

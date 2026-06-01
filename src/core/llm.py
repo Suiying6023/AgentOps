@@ -1,11 +1,12 @@
 from functools import cache
 from typing import cast
-from langchain_community.chat_models import FakeListChatModel
+from langchain_core.language_models import FakeListChatModel
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
 from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import asyncio
+import sys
 
 from core.settings import settings
 from schema import DeepseekModelName, FakeModelName, ModelName, OpenAIModelName, SiliconFlowModelName
@@ -17,11 +18,11 @@ class ToolAwareFakeModel(FakeListChatModel):
 
 class SiliconFlowChatOpenAI(ChatOpenAI):
     """
-    专门为 SiliconFlow 等不支持 n > 1 的模型提供并发/串行降级支持的工业级补丁类。
-    核心能力：自动拦截 n>1 的请求，拆解为 n 个独立请求并并发执行，最后伪装合并 Token 计算。
+    为不支持 n > 1 的模型提供并发降级支持。
+    自动拦截 n>1 的请求，拆解为 n 个独立请求并并发执行，最后合并结果。
     """
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
-        # Ragas 的巨坑：它不会把 n 传在 kwargs 里，而是直接强行修改 self.n 属性！
+        # 适配 Ragas 框架：拦截外部修改的 self.n 属性
         target_n = kwargs.get("n", getattr(self, "n", 1))
         
         if target_n is not None and target_n > 1:
@@ -31,7 +32,7 @@ class SiliconFlowChatOpenAI(ChatOpenAI):
                 self.n = 1  # 临时屏蔽 self.n，防止 super()._agenerate 继续读取到 3
                 
             try:
-                # 核心机制：利用 asyncio.gather 并发发送 n 个独立请求
+                # 利用 asyncio.gather 并发发送 n 个独立请求
                 tasks = [super()._agenerate(messages, stop, run_manager, **kwargs) for _ in range(target_n)]
                 results = await asyncio.gather(*tasks)
             finally:
@@ -98,6 +99,7 @@ def get_model(model_name: ModelName | None = None) -> BaseChatModel:
     """
     # 如果没有指定模型，则使用 settings 中的默认模型
     target_model = model_name or settings.DEFAULT_MODEL
+    print(f"\n[DEBUG get_model] model_name: {model_name}, settings.DEFAULT_MODEL: {settings.DEFAULT_MODEL}, target_model: {target_model}", file=sys.stderr)
 
     # 1. 处理模拟模型 (用于无网本地快速测试)
     if target_model == FakeModelName.FAKE:
@@ -162,7 +164,7 @@ def get_embeddings() -> Embeddings:
         
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"🔧 初始化本地 Embedding 模型 (BAAI/bge-m3) - Device: {device}")
+        print(f"🔧 初始化本地 Embedding 模型 (BAAI/bge-m3) - Device: {device}", file=sys.stderr)
         
         return HuggingFaceEmbeddings(
             model_name="BAAI/bge-m3",
@@ -175,7 +177,7 @@ def get_embeddings() -> Embeddings:
         from typing import cast
         
         api_key = cast(str, settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else "sk-NoCIP2lKzL1SxctciLVOF6W0Jsp5qs1UxZ09Wvi8kPQY73rK")
-        print("🔧 初始化在线 Embedding 模型 (qwen3-embedding-8b)")
+        print("🔧 初始化在线 Embedding 模型 (qwen3-embedding-8b)", file=sys.stderr)
         
         return OpenAIEmbeddings(
             model="qwen3-embedding-8b",

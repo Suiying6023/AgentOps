@@ -15,7 +15,7 @@ DEFAULT_AGENT = "graph_agent"
 
 agents: dict[str, AgentEntry] = {
     "graph_agent": AgentEntry(
-        description="基于 LangGraph 状态图引擎编排的全新对话 Agent",
+        description="基于 LangGraph 编排的智能体",
         agent=GraphAgent(),
     ),
 }

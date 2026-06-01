@@ -1,4 +1,5 @@
 import os
+import sys
 from datetime import datetime
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
@@ -16,11 +17,11 @@ class WikiExtraction(BaseModel):
     pages: list[WikiPage] = Field(description="从原文中提取出的独立且高价值的维基百科页面列表")
 
 def compile_document_to_wiki(file_path: str):
-    """将非结构化文档直接编译为高价值的 Markdown 维基体系 (实验性功能)"""
+    """将文档编译为结构化 Markdown 页面集合"""
     from core.llm import get_model
     os.makedirs(WIKI_DIR, exist_ok=True)
     
-    print(f"[LLM Wiki] 🧠 正在执行知识编译引擎，读取: {file_path} ...")
+    print(f"[Wiki] 读取文件: {file_path}", file=sys.stderr)
     
     if file_path.endswith(".pdf"):
         from langchain_community.document_loaders import PyPDFLoader
@@ -31,27 +32,31 @@ def compile_document_to_wiki(file_path: str):
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
             
-    # 初始化大模型并强制输出严格的 Pydantic 结构
+    # 配置模型结构化输出
     llm = get_model()
     try:
         structured_llm = llm.with_structured_output(WikiExtraction)
     except NotImplementedError:
-        print("[LLM Wiki] ⚠️ 当前厂商模型不支持 Function Calling 结构化输出，编译失败。请切换到 OpenAI / DeepSeek 主力模型。")
+        print("[Wiki] 当前模型不支持结构化输出，编译失败。", file=sys.stderr)
         return
         
-    prompt = f"""你是一个顶级的企业级知识架构师 (Knowledge Compiler)。
-你的任务是深度阅读用户上传的未整理文稿，提取出其中独立的、高价值的核心概念和实体，并为每一个实体编写一份排版精美的结构化 Wiki 页面。
-请遵循纪律：
-1. 不要输出任何寒暄，只输出提取后的严格数据结构。
-2. 每个页面必须是独立、连贯的 Markdown 格式。
-3. 发现相关知识点时，使用 [[链接名]] 的格式创建双向关联感。
+    prompt = f"""提取用户上传文稿中的核心概念和实体，为每个实体输出一份结构化 Markdown 格式的 Wiki 页面。
+请遵循以下要求：
+1. 仅输出 JSON 数据结构。
+2. 每个页面内容为独立 Markdown 格式。
+3. 若提及其他相关概念，使用 [[链接名]] 语法标注。
 
 原始未整理资料：
 {text[:20000]}
 """
     
     try:
+        from tools.rag import get_vector_store
+        from langchain_core.documents import Document
+        vector_store = get_vector_store()
+        
         extraction = structured_llm.invoke([HumanMessage(content=prompt)])
+        wiki_docs = []
         
         for page in extraction.pages:
             # 文件名过滤非法字符
@@ -62,7 +67,7 @@ def compile_document_to_wiki(file_path: str):
             frontmatter = f"---\ntitle: {page.title}\nupdated_at: {datetime.now().isoformat()}\ntags: [{', '.join(page.tags)}]\n---\n\n"
             
             if os.path.exists(page_path):
-                # 进阶玩法：未来可以让大模型“融合”两次内容，这里我们先简单追加
+                # 追加写入已存在的页面
                 with open(page_path, "a", encoding="utf-8") as f:
                     f.write("\n\n## 🔄 系统追加入库信息\n")
                     f.write(page.content)
@@ -70,38 +75,56 @@ def compile_document_to_wiki(file_path: str):
                 with open(page_path, "w", encoding="utf-8") as f:
                     f.write(frontmatter + page.content)
                     
-            print(f"[LLM Wiki] 📄 成功凝练页面: {page_path}")
+            print(f"[Wiki] 写入页面: {page_path}", file=sys.stderr)
             
-        print("[LLM Wiki] ✅ 知识编译与组装完成！")
+            # 【重要】把 Wiki 页面的元信息和核心摘要制作成向量索引，打入底层 PGVector
+            wiki_docs.append(Document(
+                page_content=f"[Wiki核心词条] {page.title}\n关键摘要: {page.content[:800]}",
+                metadata={"source_wiki": page_path, "wiki_title": page.title, "type": "wiki"}
+            ))
+            
+        # 写入向量库
+        if wiki_docs:
+            vector_store.add_documents(wiki_docs)
+            print(f"[Wiki] 成功建立 {len(wiki_docs)} 个实体的语义寻址向量索引", file=sys.stderr)
+            
+        print("[Wiki] 编译完成", file=sys.stderr)
     except Exception as e:
-        print(f"[LLM Wiki] ❌ 编译异常: {e}")
+        print(f"[Wiki] 编译异常: {e}", file=sys.stderr)
 
 @tool
 def search_llm_wiki(query: str) -> str:
-    """【实验功能】当你被明确要求搜索“维基”、“精华知识”或你需要获取高度提炼的结构化实体信息时，必须调用此工具。
-    它会遍历并读取经过后台 LLM 深度编译后的完整 Markdown 页面，而不是零碎的切片片段。
+    """搜索 Wiki 页面内容。
     
     Args:
-        query: 核心实体或关键词
+        query: 搜索关键词
     """
-    if not os.path.exists(WIKI_DIR):
-        return "本地 LLM Wiki 知识库为空，暂无经过编译的词条。"
+    try:
+        from tools.rag import get_vector_store
+        vector_store = get_vector_store()
         
-    results = []
-    query_lower = query.lower()
-    
-    # MVP 版本：基于全局文件系统的全文硬匹配
-    for filename in os.listdir(WIKI_DIR):
-        if not filename.endswith(".md"): continue
-        filepath = os.path.join(WIKI_DIR, filename)
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-            # 如果标题或正文命中了，把整个“完整编译好”的页面直接喂给检索者
-            if query_lower in filename.lower() or query_lower in content.lower():
-                results.append(f"【维基页面：{filename}】\n{content}")
-                
-    if not results:
-        return f"在 LLM Wiki 词条库中未找到与 '{query}' 直接相关的系统化页面。"
+        print(f"[Wiki Search] 正在使用 PGVector 语义寻址 Wiki 词条: {query}", file=sys.stderr)
         
-    # 为了防止上下文溢出，最多返回前 3 个完整页面的深度内容
-    return "\n\n====================\n\n".join(results[:3])
+        # 通过语义搜索向量库，扩大召回面
+        results = vector_store.similarity_search(query, k=10)
+        
+        wiki_hits = []
+        seen_paths = set()
+        
+        for doc in results:
+            # 精确拦截我们打过 'wiki' 标签的索引卡片
+            if doc.metadata.get("type") == "wiki":
+                path = doc.metadata.get("source_wiki")
+                if path and path not in seen_paths and os.path.exists(path):
+                    seen_paths.add(path)
+                    # 反向定位到物理文件，读取100%全貌的完整 Markdown 词条！
+                    with open(path, "r", encoding="utf-8") as f:
+                        wiki_hits.append(f"【Wiki 完整结构化词条：{doc.metadata.get('wiki_title', '未知')}】\n{f.read()}")
+                        
+        if not wiki_hits:
+            return f"Wiki 库中未找到与 '{query}' 高度相关的结构化词条。"
+            
+        # 返回前两个最相关的完整词条（保证无切割上下文，且不爆 token）
+        return "\n\n====================\n\n".join(wiki_hits[:2])
+    except Exception as e:
+        return f"Wiki语义检索失败: {e}"
