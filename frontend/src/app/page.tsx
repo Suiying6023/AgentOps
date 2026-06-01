@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Bot, User, Wrench, Clock, Cpu, MessageSquare, Plus, ChevronDown, Paperclip, Loader2 } from "lucide-react";
+import { Send, Sparkles, Bot, User, Wrench, Clock, Cpu, MessageSquare, Plus, ChevronDown, Paperclip, Loader2, Wand2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -80,7 +80,7 @@ export default function Chat() {
     setMessages([]);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: "rag" | "wiki" = "rag") => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -88,16 +88,18 @@ export default function Chat() {
     const formData = new FormData();
     formData.append("file", file);
 
+    const endpoint = mode === "wiki" ? "http://localhost:8080/knowledge/upload_wiki" : "http://localhost:8080/knowledge/upload";
+
     try {
-      const res = await fetch("http://localhost:8080/knowledge/upload", {
+      const res = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
       const data = await res.json();
       if (res.ok) {
-        alert("📚 上传与解析成功！\\n该文档现已切片并进入 PGVector 向量库，研究专员 (Researcher) 可以根据需要随时查阅了。");
+        alert(data.message);
       } else {
-        alert("上传失败：" + data.detail);
+        alert("处理失败：" + data.detail);
       }
     } catch (err) {
       console.error(err);
@@ -378,26 +380,52 @@ export default function Chat() {
                 type="file"
                 className="hidden"
                 ref={fileInputRef}
-                onChange={handleFileUpload}
+                onChange={(e) => {
+                  // 这里用个极简的 Trick：如果 accept 包含了 pdf，我们默认当作 RAG 传。如果是 markdown，走 Wiki。
+                  // 为了更优雅，我们直接分两个触发入口。
+                  // 但目前 ref 只有一个，所以在下面改用了两个 onClick，配合一个状态。
+                }}
                 accept=".txt,.md,.pdf"
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isTyping || isUploading}
-                className="absolute left-2 p-2.5 text-gray-400 hover:text-black transition-colors disabled:opacity-50 z-10"
-                title="上传 PDF 或 TXT/MD 供研究专员分析"
-              >
-                {isUploading ? <Loader2 size={18} className="animate-spin text-black" /> : <Paperclip size={18} />}
-              </button>
+              
+              <div className="absolute left-2 flex items-center z-10 gap-1 bg-white/90 backdrop-blur pl-1 rounded-l-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                        if(fileInputRef.current) {
+                            fileInputRef.current.onchange = (e: any) => handleFileUpload(e, "rag");
+                            fileInputRef.current.click();
+                        }
+                    }}
+                    disabled={isTyping || isUploading}
+                    className="p-2 text-gray-400 hover:text-black transition-colors disabled:opacity-50"
+                    title="上传资料 -> 常规向量库 (RAG)"
+                  >
+                    {isUploading ? <Loader2 size={16} className="animate-spin text-black" /> : <Paperclip size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                        if(fileInputRef.current) {
+                            fileInputRef.current.onchange = (e: any) => handleFileUpload(e, "wiki");
+                            fileInputRef.current.click();
+                        }
+                    }}
+                    disabled={isTyping || isUploading}
+                    className="p-2 text-gray-400 hover:text-purple-600 transition-colors disabled:opacity-50"
+                    title="实验功能：上传资料 -> LLM 知识编译机 (LLM Wiki)"
+                  >
+                    <Wand2 size={16} />
+                  </button>
+              </div>
               
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="发送指令给主脑 Supervisor... (点击左侧附件可上传资料)"
+                placeholder="发送指令给主脑 Supervisor... (左侧可选 RAG 或 Wiki 模式上传)"
                 disabled={isTyping || isUploading}
-                className="w-full pl-12 pr-12 py-4 focus:outline-none transition-all disabled:opacity-50 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 text-[15px] focus:bg-white focus:ring-1 focus:ring-black"
+                className="w-full pl-20 pr-12 py-4 focus:outline-none transition-all disabled:opacity-50 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 text-[15px] focus:bg-white focus:ring-1 focus:ring-black"
               />
               <button
                 type="submit"

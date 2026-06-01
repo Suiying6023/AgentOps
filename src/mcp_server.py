@@ -17,10 +17,21 @@ def search_knowledge(query: str) -> str:
     如果你无法通过常识回答，或者需要引用权威资料，请使用此工具。
     """
     try:
-        # LangChain 的 @tool 包装器可以直接通过 invoke 触发
+        from tools.rag import search_knowledge_base
         return search_knowledge_base.invoke({"query": query})
     except Exception as e:
         return f"检索失败，原因: {str(e)}"
+
+@mcp.tool()
+def search_compiled_wiki(query: str) -> str:
+    """【实验功能】当你被明确要求搜索“维基”、“精华知识”或你需要获取高度提炼的结构化实体信息时，必须调用此工具。
+    它会遍历并读取经过后台 LLM 深度编译后的完整 Markdown 页面，而不是零碎的切片片段。
+    """
+    try:
+        from tools.wiki_compiler import search_llm_wiki
+        return search_llm_wiki.invoke({"query": query})
+    except Exception as e:
+        return f"Wiki检索失败，原因: {str(e)}"
 
 # 3. 暴露天气查询为 MCP Tool
 @mcp.tool()
