@@ -280,10 +280,10 @@ export default function Chat() {
                     <Bot size={32} />
                   </div>
                   <h2 className="text-2xl mb-3 font-semibold text-gray-900 tracking-tight">
-                    随时待命。
+                    系统就绪
                   </h2>
                   <p className="max-w-md mx-auto text-sm leading-relaxed text-gray-500">
-                    在上方切换主脑模型，或者直接提问。主脑将根据任务难度，自主为 Sub-Agent 分配相应的算力与模型。
+                    在上方切换模型，或直接提问。系统将根据任务自动分配相应的子智能体。
                   </p>
                 </motion.div>
               )}
@@ -322,16 +322,16 @@ export default function Chat() {
                                             const match = part.match(/> ⚙️ \*\*\[系统日志\] 正在调用工具\*\*: `(.*?)`/);
                                             const toolName = match ? match[1] : '未知工具';
                                             return (
-                                                <div key={idx} className="my-2 inline-flex w-fit items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md border border-gray-200 bg-gray-50 text-gray-700">
+                                                <div key={idx} className="my-2 inline-flex w-fit items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 bg-gray-50 text-gray-700">
                                                     <Wrench size={12} className="animate-pulse text-gray-900" />
-                                                    Supervisor 派发任务至子智能体: {toolName}
+                                                    调用工具: {toolName}
                                                 </div>
                                             );
                                         } else if (part.startsWith('> ✅')) {
                                             return (
-                                                <div key={idx} className="my-1 inline-flex w-fit items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md border border-gray-200 bg-gray-50 text-gray-700">
+                                                <div key={idx} className="my-1 inline-flex w-fit items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 bg-gray-50 text-gray-700">
                                                     <Sparkles size={12} className="text-black" />
-                                                    子智能体处理完毕返回
+                                                    工具执行完毕
                                                 </div>
                                             );
                                         } else {
@@ -399,7 +399,7 @@ export default function Chat() {
                     }}
                     disabled={isTyping || isUploading}
                     className="p-2 text-gray-400 hover:text-black transition-colors disabled:opacity-50"
-                    title="上传资料 -> 常规向量库 (RAG)"
+                    title="上传资料 (RAG 模式)"
                   >
                     {isUploading ? <Loader2 size={16} className="animate-spin text-black" /> : <Paperclip size={16} />}
                   </button>
@@ -412,8 +412,8 @@ export default function Chat() {
                         }
                     }}
                     disabled={isTyping || isUploading}
-                    className="p-2 text-gray-400 hover:text-purple-600 transition-colors disabled:opacity-50"
-                    title="实验功能：上传资料 -> LLM 知识编译机 (LLM Wiki)"
+                    className="p-2 text-gray-400 hover:text-black transition-colors disabled:opacity-50"
+                    title="上传资料 (Wiki 模式)"
                   >
                     <Wand2 size={16} />
                   </button>
@@ -423,7 +423,7 @@ export default function Chat() {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="发送指令给主脑 Supervisor... (左侧可选 RAG 或 Wiki 模式上传)"
+                placeholder="发送指令... (左侧可选 RAG 或 Wiki 模式上传资料)"
                 disabled={isTyping || isUploading}
                 className="w-full pl-20 pr-12 py-4 focus:outline-none transition-all disabled:opacity-50 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 text-[15px] focus:bg-white focus:ring-1 focus:ring-black"
               />

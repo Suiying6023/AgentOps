@@ -301,7 +301,7 @@ async def upload_wiki(file: UploadFile = File(...)):
         from tools.wiki_compiler import compile_document_to_wiki
         import asyncio
         await asyncio.to_thread(compile_document_to_wiki, file_path)
-        return {"status": "success", "message": f"✨ 神奇发生！{file.filename} 已经被大模型完全咀嚼，并自动排版成了互相关联的高价值 Wiki 体系页面！"}
+        return {"status": "success", "message": f"文件 {file.filename} 已成功编译为 Wiki 页面。"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

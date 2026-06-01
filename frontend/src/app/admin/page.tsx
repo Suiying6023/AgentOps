@@ -78,13 +78,13 @@ export default function AdminDashboard() {
   return (
     <div className="flex h-screen font-sans bg-[#F9FAFB] text-black selection:bg-black selection:text-white">
       
-      {/* 极简黑白侧边栏 */}
+      {/* 侧边栏 */}
       <aside className="w-64 flex flex-col border-r border-gray-200 bg-white shadow-sm z-10">
         <div className="p-6 flex items-center gap-3 border-b border-gray-100">
           <div className="p-2 bg-black text-white rounded-lg shadow-md">
             <Shield size={18} />
           </div>
-          <h1 className="font-bold text-lg tracking-tight text-gray-900">Config Center</h1>
+          <h1 className="font-bold text-lg tracking-tight text-gray-900">管理页面</h1>
         </div>
         
         <div className="flex-1 p-4 space-y-2">
@@ -99,7 +99,7 @@ export default function AdminDashboard() {
         
         <div className="p-6 border-t border-gray-100 text-center">
             <span className="text-[11px] text-gray-400 font-mono tracking-tighter bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
-              AGENTOPS MONOCHROME
+              AGENTOPS V2.0
             </span>
         </div>
       </aside>
@@ -109,8 +109,8 @@ export default function AdminDashboard() {
         <div className="max-w-5xl mx-auto p-10 space-y-8">
           
           <header>
-            <h2 className="text-3xl font-bold tracking-tight text-gray-900">上游模型网关配置</h2>
-            <p className="text-gray-500 mt-2 text-sm font-medium">统一管理你在各大大模型厂商（OpenAI, DeepSeek, 硅基流动等）的 API Key 与连通性。</p>
+            <h2 className="text-3xl font-bold tracking-tight text-gray-900">模型网关配置</h2>
+            <p className="text-gray-500 mt-2 text-sm font-medium">管理大模型厂商的 API Key 与网络连通性。</p>
           </header>
 
           {/* 核心指标卡片 */}
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
           <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mt-8">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
               <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                供应商密钥池 (Provider Keys)
+                API 密钥列表
               </h3>
               <button 
                 onClick={addNewProvider}
