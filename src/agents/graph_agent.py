@@ -7,8 +7,15 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-import sqlite3
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+import sys
+import asyncio
+
+# --- Windows 兼容性补丁 ---
+# 解决 psycopg 在 Windows 默认的 ProactorEventLoop 下无法使用异步的问题
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from agents.base import BaseAgent
 from core.llm import get_model
@@ -112,11 +119,11 @@ class GraphAgent(BaseAgent):
         }
 
 
-        import os
-        os.makedirs("data", exist_ok=True)
-
-        # 动态编译，完美解决 async sqlite 数据库生命周期管理和 get_running_loop 运行时错误
-        async with AsyncSqliteSaver.from_conn_string("data/checkpoints.db") as memory_saver:
+        # 动态编译，将数据库完全切换至企业级的 PostgreSQL
+        postgres_uri = settings.postgres_uri.replace("+psycopg", "")
+        async with AsyncPostgresSaver.from_conn_string(postgres_uri) as memory_saver:
+            # setup() 首次运行会自动在 pg 里创建 checkpoints 相关表，如果表存在则无视
+            await memory_saver.setup()
             graph = self._build_graph(memory_saver)
             
             # 见证奇迹的时刻：astream_events 可以深入到图的毛细血管里

@@ -5,10 +5,11 @@ AgentOps Core 是一个基于 LangGraph 和 FastAPI 构建的智能体（AI Agen
 ## 核心特性 (Key Features)
 
 - **智能体编排**：使用 LangGraph 构建 ReAct 循环机制，支持灵活的工具调用与错误回退流转。
+- **Agentic RAG (自愈检索)**：基于 PostgreSQL (pgvector) 构建企业级知识库，集成了提问重写 (Query Rewriting)、Qwen3 极速重排 (Reranker) 以及大模型自驱重搜纠错机制。
+- **模型热切换架构**：实现了私有化 Embedding 模型与在线商业 API 的一键无缝切换，基于动态 `collection_name` 隔离多维向量空间。
 - **会话持久化隔离**：基于 SQLite 实现基于 `thread_id` 的上下文隔离机制，支持多用户独立并发会话。
 - **SSE 流式响应**：利用 Server-Sent Events (SSE) 协议向客户端实时传输模型推演过程与系统日志。
-- **可观测性与安全**：接入 Langfuse 实现调用链路追踪与 Token 监控；内置 Prompt Injection 异步拦截器。
-- **工具链扩展**：内置可配置的工具链接口，默认实现天气查询与基于 ChromaDB 的知识库检索 (RAG) 模块。
+- **可观测性与自动化评测**：深度接入 Langfuse 实现调用链路追踪，并自建了兼容中文语境的 LLM-as-a-Judge 自动化评测体系。
 - **全栈交互面板**：包含基于 Next.js 与 Tailwind CSS 构建的前端交互界面，支持多线程侧边栏管理。
 
 ## 快速启动 (Getting Started)
@@ -37,10 +38,11 @@ npm run dev
 
 ## 未来演进路线 (Roadmap & TODO)
 
-- [ ] 存储演进：剥离 SQLite，接入 PostgreSQL 集群支撑分布式状态与记忆存储。
-- [ ] 并发控制：引入 Redis 处理分布式锁，优化高并发场景下的 SSE 流式稳定性。
-- [ ] 深度 RAG：引入 Query Rewriting (提问重写) 与 Self-Correction (检索自纠错) 机制提升准确度。
-- [ ] 多智能体协作：引入 Supervisor 路由中枢，实现多角色 Agent 协同工作流。
+- [ ] **并发锁机制 (Next)**：引入 `asyncio.Lock` 或 PostgreSQL Advisory Lock，解决高并发下的状态冲突与竞争问题。
+- [x] **存储全面演进**：将 LangGraph Checkpointer 底层也从 SQLite 替换为 PostgreSQL，完成 100% 数据库一统。
+- [ ] **工具协议化**：剥离耦合，将知识库检索等工具封装为独立的 FastMCP 微服务节点。
+- [ ] **多智能体协作**：引入 Supervisor 路由中枢，实现多角色 Agent (打分专家、检索专家、闲聊专员) 的协同工作流。
+- [ ] **动态网关与运营面板**：搭建前端 Admin 控制台，支持 API Key 动态下发与成本可视化分析。
 
 ## 许可证
 
