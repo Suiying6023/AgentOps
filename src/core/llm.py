@@ -9,6 +9,7 @@ import asyncio
 
 from core.settings import settings
 from schema import DeepseekModelName, FakeModelName, ModelName, OpenAIModelName, SiliconFlowModelName
+from core.config_manager import get_provider_key
 
 class ToolAwareFakeModel(FakeListChatModel):
     def bind_tools(self, tools, **kwargs):
@@ -104,34 +105,38 @@ def get_model(model_name: ModelName | None = None) -> BaseChatModel:
 
     # 2. 处理 OpenAI 模型
     if target_model in list(OpenAIModelName):
+        api_key = get_provider_key("openai") or (settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else "")
         return ChatOpenAI(
             model=target_model,
-            api_key=cast(str, settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else ""),
+            api_key=cast(str, api_key),
             temperature=0.5,
         )
 
     # 3. 处理 DeepSeek 模型 (兼容 OpenAI 接口格式)
     if target_model in list(DeepseekModelName):
+        api_key = get_provider_key("deepseek") or (settings.DEEPSEEK_API_KEY.get_secret_value() if settings.DEEPSEEK_API_KEY else "")
         return ChatOpenAI(
             model=target_model,
-            api_key=cast(str, settings.DEEPSEEK_API_KEY.get_secret_value() if settings.DEEPSEEK_API_KEY else ""),
+            api_key=cast(str, api_key),
             base_url="https://api.deepseek.com/v1",
             temperature=0.5,
         )
 
     # 4. 处理硅基流动 (SiliconFlow) 模型，加入主备 fallback 机制
     if target_model in list(SiliconFlowModelName):
+        api_key = get_provider_key("siliconflow") or (settings.SILICONFLOW_PRIMARY_KEY.get_secret_value() if settings.SILICONFLOW_PRIMARY_KEY else "")
         primary_model = SiliconFlowChatOpenAI(
             model=target_model,
-            api_key=cast(str, settings.SILICONFLOW_PRIMARY_KEY.get_secret_value() if settings.SILICONFLOW_PRIMARY_KEY else ""),
+            api_key=cast(str, api_key),
             base_url="https://api.siliconflow.cn/v1",
             temperature=0.6,
         )
         
-        if settings.SILICONFLOW_FALLBACK_KEY:
+        fallback_key = get_provider_key("siliconflow_fallback") or (settings.SILICONFLOW_FALLBACK_KEY.get_secret_value() if settings.SILICONFLOW_FALLBACK_KEY else "")
+        if fallback_key:
             fallback_model = SiliconFlowChatOpenAI(
                 model=target_model,
-                api_key=cast(str, settings.SILICONFLOW_FALLBACK_KEY.get_secret_value() if settings.SILICONFLOW_FALLBACK_KEY else ""),
+                api_key=cast(str, fallback_key),
                 base_url="https://api.siliconflow.cn/v1",
                 temperature=0.6,
             )

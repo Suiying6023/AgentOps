@@ -25,6 +25,14 @@ from schema import (
 
 app = FastAPI(title="My Agent Service")
 
+@app.on_event("startup")
+async def startup_event():
+    from core.config_manager import init_db, load_configs
+    # 初始化动态网关的 PostgreSQL 表并热加载到内存
+    init_db()
+    load_configs()
+
+
 # 允许跨域，方便 Next.js 前端调用
 app.add_middleware(
     CORSMiddleware,
@@ -223,5 +231,33 @@ async def get_threads() -> list[str]:
 
 
 
+
+# ==========================================
+# Phase 13: 动态模型网关 Admin API 
+# ==========================================
+from pydantic import BaseModel
+
+class ProviderConfigRequest(BaseModel):
+    provider: str
+    api_key: str
+    model_type: str = ""
+    base_url: str | None = None
+
+@protected_router.get("/admin/providers")
+async def get_providers():
+    from core.config_manager import get_all_providers
+    return get_all_providers()
+
+@protected_router.post("/admin/providers")
+async def update_provider(req: ProviderConfigRequest):
+    from core.config_manager import upsert_provider
+    upsert_provider(req.provider, req.api_key, req.model_type, req.base_url)
+    return {"status": "success"}
+
+@protected_router.delete("/admin/providers/{provider}")
+async def remove_provider(provider: str):
+    from core.config_manager import delete_provider
+    delete_provider(provider)
+    return {"status": "success"}
 
 app.include_router(protected_router)

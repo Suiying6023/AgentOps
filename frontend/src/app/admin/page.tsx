@@ -14,28 +14,65 @@ type ProviderKey = {
 };
 
 export default function AdminDashboard() {
-  const [keys, setKeys] = useState<ProviderKey[]>([
-    { id: "1", provider: "DeepSeek Official", modelType: "deepseek-chat, deepseek-reasoner", key: "sk-******************", status: "connected", latency: 240 },
-    { id: "2", provider: "SiliconFlow (主路)", modelType: "DeepSeek-V3.2, Qwen3", key: "sk-******************", status: "connected", latency: 120 },
-    { id: "3", provider: "OpenAI", modelType: "gpt-4o, gpt-4o-mini", key: "sk-proj-**************", status: "error", latency: 0 }
-  ]);
-  
+  const [keys, setKeys] = useState<ProviderKey[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  const addNewProvider = () => {
+  useEffect(() => {
+    fetchProviders();
+  }, []);
+
+  const fetchProviders = async () => {
+    try {
+      // 假设当前为未开启 Bearer Token 的测试环境，开启后需传入 headers: Authorization
+      const res = await fetch("http://localhost:8080/admin/providers");
+      const data = await res.json();
+      setKeys(data.map((item: any) => ({
+        id: item.provider,
+        provider: item.provider,
+        modelType: item.model_type || "N/A",
+        key: item.api_key.substring(0, 8) + "******************",
+        status: item.status,
+        latency: item.latency || 0
+      })));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const addNewProvider = async () => {
+    const providerName = prompt("请输入厂商名称 (例如 openai, deepseek, siliconflow):");
+    if (!providerName) return;
+    const apiKey = prompt(`请输入 ${providerName} 的 API Key:`);
+    if (!apiKey) return;
+    
     setIsUpdating(true);
-    setTimeout(() => {
-      const newKey: ProviderKey = {
-        id: Date.now().toString(),
-        provider: "New Provider",
-        modelType: "custom-model",
-        key: "sk-...",
-        status: "connected",
-        latency: 180
-      };
-      setKeys([newKey, ...keys]);
+    try {
+      await fetch("http://localhost:8080/admin/providers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: providerName,
+          api_key: apiKey,
+          model_type: "dynamic",
+          base_url: null
+        })
+      });
+      await fetchProviders();
+    } catch (e) {
+      alert("添加失败");
+    } finally {
       setIsUpdating(false);
-    }, 600);
+    }
+  };
+
+  const deleteProvider = async (provider: string) => {
+    if (!confirm(`确定要移除 ${provider} 的配置吗？`)) return;
+    try {
+      await fetch(`http://localhost:8080/admin/providers/${provider}`, { method: "DELETE" });
+      await fetchProviders();
+    } catch (e) {
+      alert("删除失败");
+    }
   };
 
   return (
@@ -174,8 +211,11 @@ export default function AdminDashboard() {
                         {k.latency > 0 ? `${k.latency}ms` : '-'}
                       </td>
                       <td className="p-5 text-right">
-                        <button className="text-gray-500 hover:text-black hover:bg-gray-200 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ml-auto opacity-0 group-hover:opacity-100">
-                          <Edit2 size={14} /> 更新密钥
+                        <button 
+                          onClick={() => deleteProvider(k.provider)}
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ml-auto opacity-0 group-hover:opacity-100"
+                        >
+                          <Edit2 size={14} /> 移除配置
                         </button>
                       </td>
                     </motion.tr>
