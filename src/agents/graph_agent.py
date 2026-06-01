@@ -10,21 +10,14 @@ from langgraph.prebuilt import ToolNode, tools_condition
 import sys
 import asyncio
 
-# --- Windows 兼容性补丁 ---
-# 解决 psycopg 在 Windows 默认的 ProactorEventLoop 下无法使用异步的问题
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from agents.base import BaseAgent
 from core.llm import get_model
 from schema import ChatMessage, UserInput
-from tools.rag import search_knowledge_base
-from tools.weather import get_weather
 
-# 将工具放入列表
-tools = [get_weather, search_knowledge_base]
+# 这里原本是静态导入本地 tool，现在我们准备全面拥抱 MCP
+# 我们将会在 invoke 时动态挂载外部的微服务工具。
 
 
 # 2. 定义图的“状态” (State)
@@ -42,7 +35,7 @@ class GraphAgent(BaseAgent):
     def __init__(self):
         super().__init__()
 
-    def _build_graph(self, memory_saver):
+    def _build_graph(self, memory_saver, tools: list):
         # 实例化图画板，并绑定我们定义好的 State
         workflow = StateGraph(AgentState)
 
@@ -121,10 +114,15 @@ class GraphAgent(BaseAgent):
 
         # 动态编译，将数据库完全切换至企业级的 PostgreSQL
         postgres_uri = settings.postgres_uri.replace("+psycopg", "")
+        
+        # 🌟 Phase 12: 动态拉取外部的 MCP 微服务工具
+        from core.mcp_client import get_mcp_tools
+        mcp_tools = await get_mcp_tools()
+        
         async with AsyncPostgresSaver.from_conn_string(postgres_uri) as memory_saver:
             # setup() 首次运行会自动在 pg 里创建 checkpoints 相关表，如果表存在则无视
             await memory_saver.setup()
-            graph = self._build_graph(memory_saver)
+            graph = self._build_graph(memory_saver, mcp_tools)
             
             # 见证奇迹的时刻：astream_events 可以深入到图的毛细血管里
             # 把图内部大模型的“逐字流事件”给直接截获出来！
