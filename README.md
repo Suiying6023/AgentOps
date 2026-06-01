@@ -41,8 +41,9 @@ npm run dev
 - [x] **并发分布式锁**：接入原生 Redis，引入 `ThreadConcurrencyLock`，完美拦截同会话的高并发连击，解决状态冲突与竞争问题。
 - [x] **存储全面演进**：将 LangGraph Checkpointer 底层也从 SQLite 替换为 PostgreSQL，完成 100% 数据库一统。
 - [x] **工具协议化**：接入了 `FastMCP` 与 `langchain-mcp-adapters`，将系统级工具剥离为独立的 Model Context Protocol 微服务节点。
-- [x] **多智能体协作**：引入 Supervisor 路由中枢，实现多角色 Agent (打分专家、检索专家、闲聊专员) 的协同工作流。
-- [ ] **动态网关与运营面板**：搭建前端 Admin 控制台，支持上游模型厂商 (OpenAI/DeepSeek) API Key 的动态管理与网关连通性看板。
+- [x] **多层级智能体协作 (Multi-Agent)**：引入 Supervisor 路由中枢，实现大管家与下级专员的协同，并在节点运行时根据任务复杂度进行多模型算力降级分发 (Model Tiering)。
+- [x] **动态网关与配置中枢**：摒弃 `.env` 静态硬编码，搭建前端极简黑白 Admin 控制台，并在底层利用 PostgreSQL 实现上游大模型厂商 (OpenAI/DeepSeek/SiliconFlow) API Key 的秒级热更新挂载。
+- [x] **知识双驱引擎 (Dual-Knowledge Engine)**：在经典的 PGVector Agentic RAG 切片体系之外，新增基于 2026 最新范式的 **LLM Wiki 知识编译器**，支持将冗长文档一键自动编译为无中心化、双向链接的结构化 Markdown 百科词条树。
 
 ## 许可证
 
