@@ -1,5 +1,5 @@
 from collections.abc import AsyncGenerator
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, Literal, NotRequired
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import tool
@@ -27,6 +27,8 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     # 我们把用户选择的模型名也放进状态里，供后续的 Node 读取
     model_name: str
+    # 由主管动态决定的子智能体复杂度级别
+    subagent_complexity: NotRequired[Literal["simple", "complex"]]
 
 
 class GraphAgent(BaseAgent):
@@ -47,23 +49,43 @@ class GraphAgent(BaseAgent):
         # Phase 12: 多智能体 (Multi-Agent) 路由主管架构
         # ---------------------------------------------------------
         
-        # 1. 定义主管用来分发任务的虚拟工具
-        @tool
-        def transfer_to_researcher():
+        # 1. 定义主管用来分发任务的虚拟工具，新增复杂度参数
+        from pydantic import BaseModel, Field
+        
+        class TransferArgs(BaseModel):
+            complexity: Literal["simple", "complex"] = Field(
+                default="simple",
+                description="任务复杂度。如果只是查天气或单一事实核查，填 'simple'；如果需要阅读多份长文档并进行深度逻辑推理，填 'complex'。"
+            )
+
+        @tool(args_schema=TransferArgs)
+        def transfer_to_researcher(complexity: str):
             """当遇到需要查询知识库、内部文档、或者查天气的需求时，必须调用此工具将任务移交给研究专员(Researcher)。"""
             pass
 
-        # 2. 初始化 Researcher 子图 (Sub-Agent)
-        # 这是标准的 Manager-Worker 模式，Researcher 本身是一个具备 MCP 工具的 ReAct 闭环
-        researcher_model = get_model() # 搬砖智能体默认使用快速主力模型
-        researcher_agent = create_react_agent(
-            researcher_model,
-            tools=tools,
-            state_modifier=SystemMessage(content="你是资深的调研专员(Researcher)。你有权限使用外部 MCP 微服务工具来检索信息和获取天气。拿到数据后，请直接向用户输出客观、精炼的事实总结，不要废话。")
-        )
-
         async def researcher_node(state: AgentState) -> Command:
-            """调研专员节点"""
+            """调研专员节点 (支持动态模型切换)"""
+            
+            # 🌟 核心突破：让子节点在运行时动态读取主管派发的复杂度，当场生成专属 Agent！
+            complexity = state.get("subagent_complexity", "simple")
+            
+            if complexity == "complex":
+                # 复杂推理使用最强模型 (比如 GPT-4o 或 DeepSeek-R1 等)
+                # 这里为了兼容我们在 schema.py 里的配置，使用 gpt-4o 或对应的旗舰模型
+                sub_model_name = "deepseek-reasoner"  # 或任何贵/强的模型
+                print("[系统日志] 🧠 触发高智商深思模式 (Complex) ->", sub_model_name)
+            else:
+                # 简单查询使用极速模型，省钱且快
+                sub_model_name = "deepseek-chat"
+                print("[系统日志] ⚡ 触发极速搬砖模式 (Simple) ->", sub_model_name)
+                
+            researcher_model = get_model(sub_model_name)
+            researcher_agent = create_react_agent(
+                researcher_model,
+                tools=tools,
+                state_modifier=SystemMessage(content="你是资深的调研专员(Researcher)。你有权限使用外部 MCP 微服务工具来检索信息和获取天气。拿到数据后，请直接向用户输出客观、精炼的事实总结，不要废话。")
+            )
+            
             # 将主状态的对话历史透传给子图执行
             result = await researcher_agent.ainvoke({"messages": state["messages"]})
             # 仅提取子图中新生成的回复或工具日志，避免历史重复
@@ -90,8 +112,14 @@ class GraphAgent(BaseAgent):
             
             # 如果主管决定委派任务
             if response.tool_calls and response.tool_calls[0]["name"] == "transfer_to_researcher":
+                # 获取主管评估的复杂度
+                complexity = response.tool_calls[0]["args"].get("complexity", "simple")
+                
                 # 注意：为了让 Researcher 能看到用户最原始的问题，我们这里不把带有 tool_call 的 response 存入状态，而是直接进行跳转
-                return Command(goto="researcher")
+                return Command(
+                    goto="researcher",
+                    update={"subagent_complexity": complexity}
+                )
                 
             # 如果主管决定亲自回答（包含寒暄或结语）
             return Command(
