@@ -138,13 +138,6 @@ sequenceDiagram
     API-->>Client: 推送 [DONE] 结束流
 ```
 
-## 编码规范提示
-
-- **模型动态解析**：模型 ID 使用 `{provider}/{model_name}` 结构（例如 `openai/gpt-4o`）。在 `src/core/llm.py` 内动态切分，不再依赖固化的 Enum。
-- **子智能体开发**：在 `graph_agent.py` 中，如果需要开发新的专门子智能体，必须通过 `invoke_subagent` 统一入口，按 `complexity` 申请算力，不要直接硬编码模型名。
-- **并发与持久化**：所有的存储操作均需通过 `src/core/memory.py` 的 PostgreSQL 连接池完成。禁止使用本地 JSON 或 SQLite 保存核心业务数据。
-- **工具开发**：新增加的系统工具应统一放置于 `src/tools/` 下，完善异常捕获后返回给大模型。
-
 ## 快速启动 (Getting Started)
 
 ### 1. 服务端准备 (Backend)
