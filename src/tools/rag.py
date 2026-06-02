@@ -123,8 +123,8 @@ def search_knowledge_base(query: str) -> str:
         import requests
         from core.settings import settings
         
+        api_key = settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else ""
         url = settings.GEMAI_BASE_URL.replace("/v1", "") + "/v1/rerank"
-        api_key = settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else "sk-NoCIP2lKzL1SxctciLVOF6W0Jsp5qs1UxZ09Wvi8kPQY73rK"
         
         headers = {
             "Authorization": f"Bearer {api_key}",

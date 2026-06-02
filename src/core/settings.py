@@ -1,5 +1,4 @@
 from enum import StrEnum
-from schema import ModelName, OpenAIModelName, SiliconFlowModelName
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -44,16 +43,19 @@ class Settings(BaseSettings):
 
     AUTH_SECRET: SecretStr | None = None
     OPENAI_API_KEY: SecretStr | None = None
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     DEEPSEEK_API_KEY: SecretStr | None = None
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     GEMAI_API_KEY: SecretStr | None = None
     GEMAI_BASE_URL: str = "https://api.gemai.cc/v1"
     GEMAI_RERANKER_MODEL: str = "qwen3-reranker-8b"
     
-    # 核心组件开关：True 代表使用本地 BGE-M3，False 代表使用在线的 GEMAI Embedding
+    # 核心组件开关：True 代表使用本地 BGE-M3， False 代表使用在线的 GEMAI Embedding
     USE_LOCAL_EMBEDDING: bool = False
     
-    SILICONFLOW_PRIMARY_KEY: SecretStr
-    SILICONFLOW_FALLBACK_KEY: SecretStr
+    SILICONFLOW_PRIMARY_KEY: SecretStr | None = None
+    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
+    SILICONFLOW_FALLBACK_KEY: SecretStr | None = None
     LANGFUSE_ENABLED: bool = True
 
     # PostgreSQL 关系与向量数据库配置
@@ -78,8 +80,8 @@ class Settings(BaseSettings):
             return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
 
-    # 默认模型设置 (更新为 DeepSeek-V3.2)
-    DEFAULT_MODEL: ModelName = SiliconFlowModelName.DEEPSEEK_V3_2
+    # 默认模型设置
+    DEFAULT_MODEL: str = "siliconflow/deepseek-ai/DeepSeek-V3.2"
     def is_dev(self) -> bool:
         return self.MODE == "dev"
 

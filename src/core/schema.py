@@ -9,32 +9,6 @@ class Provider(StrEnum):
     SILICONFLOW = "siliconflow"
     FAKE = "fake"
 
-class SiliconFlowModelName(StrEnum):
-    DEEPSEEK_R1 = "deepseek-ai/DeepSeek-R1"
-    DEEPSEEK_V3_2 = "deepseek-ai/DeepSeek-V3.2"
-    KIMI_K2_THINKING = "moonshotai/Kimi-K2-Thinking"
-    QWEN3_235B = "Qwen/Qwen3-235B-A22B-Instruct-2507"
-
-class OpenAIModelName(StrEnum):
-    GPT_4O = "gpt-4o"
-    GPT_4O_MINI = "gpt-4o-mini"
-
-class DeepseekModelName(StrEnum):
-    DEEPSEEK_CHAT = "deepseek-chat"
-    DEEPSEEK_REASONER = "deepseek-reasoner"
-
-class FakeModelName(StrEnum):
-    FAKE = "fake"
-
-ModelName: TypeAlias = OpenAIModelName | DeepseekModelName | SiliconFlowModelName | FakeModelName
-
-PROVIDER_TO_MODEL_ENUM = {
-    Provider.OPENAI: OpenAIModelName,
-    Provider.DEEPSEEK: DeepseekModelName,
-    Provider.SILICONFLOW: SiliconFlowModelName,
-    Provider.FAKE: FakeModelName,
-}
-
 class AgentInfo(BaseModel):
     """一个可用 Agent 的基本信息。"""
 
@@ -67,9 +41,9 @@ class UserInput(BaseModel):
         description="用户输入。",
         examples=["你好，请介绍一下你自己。"],
     )
-    model: ModelName | None = Field(
+    model: str | None = Field(
         default=None,
-        description="本次请求使用的大模型名称。如果为空，则使用系统默认模型。",
+        description="本次请求使用的大模型名称（例如 'openai/gpt-4o'）。如果为空，则使用系统默认模型。",
     )
     thread_id: str | None = Field(
         default=None,

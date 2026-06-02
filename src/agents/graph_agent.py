@@ -12,9 +12,10 @@ import asyncio
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from agents.base import BaseAgent
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
 from core.llm import get_model
-from schema import ChatMessage, UserInput
+from core.schema import ChatMessage, UserInput
 
 # 动态挂载外部的微服务工具。
 
@@ -29,11 +30,11 @@ class AgentState(TypedDict):
     subagent_complexity: NotRequired[Literal["simple", "complex"]]
 
 
-class GraphAgent(BaseAgent):
+class GraphAgent:
     """基于 LangGraph 编排的智能体"""
 
     def __init__(self):
-        super().__init__()
+        pass
 
     def _build_graph(self, memory_saver, tools: list):
         from langgraph.types import Command
@@ -45,17 +46,31 @@ class GraphAgent(BaseAgent):
 
         class SubagentArgs(BaseModel):
             task: str = Field(description="子智能体需要执行的具体任务指令")
-            complexity: Literal["simple", "complex"] = Field(
-                default="simple",
-                description="任务复杂度。简单查询填 'simple'，复杂推理填 'complex'。"
+            complexity: Literal["low", "medium", "high"] = Field(
+                default="medium",
+                description="任务复杂度。低(low)、中(medium)、高(high)分别对应不同能力的模型。"
             )
 
         @tool(args_schema=SubagentArgs)
         async def create_subagent(task: str, complexity: str) -> str:
             """创建一个独立的后台子智能体来处理特定任务（如耗时检索、深入推理、并行子任务），并返回其执行结果报告。"""
             from langgraph.prebuilt import create_react_agent
+            from core.config_manager import get_system_config
+            display_models = get_system_config("display_models", [])
             
-            sub_model_name = "deepseek-ai/DeepSeek-R1" if complexity == "complex" else "deepseek-ai/DeepSeek-V3.2"
+            # 从配置中获取管理员设置的子智能体模型
+            sub_model_name = get_system_config(f"subagent_model_{complexity}")
+            
+            # 兜底：如果配置为空或者未在开启列表中，则优先回退到第一个可用模型，否则硬编码兜底
+            if not sub_model_name or (display_models and sub_model_name not in display_models):
+                if display_models:
+                    sub_model_name = display_models[0]
+                else:
+                    if complexity == "high":
+                        sub_model_name = "siliconflow/deepseek-ai/DeepSeek-R1"
+                    else:
+                        sub_model_name = "siliconflow/deepseek-ai/DeepSeek-V3"
+
             sub_model = get_model(sub_model_name)
             
             sub_agent = create_react_agent(
@@ -137,40 +152,42 @@ class GraphAgent(BaseAgent):
 
 
         # 配置 PostgreSQL URI
-        postgres_uri = settings.postgres_uri.replace("+psycopg", "")
         
         # 动态拉取外部 MCP 工具
         from core.mcp_client import get_mcp_tools
         mcp_tools = await get_mcp_tools()
         
-        async with AsyncPostgresSaver.from_conn_string(postgres_uri) as memory_saver:
-            # setup() 首次运行会自动在 pg 里创建 checkpoints 相关表，如果表存在则无视
-            await memory_saver.setup()
-            graph = self._build_graph(memory_saver, mcp_tools)
+        from core.memory import global_checkpointer
+        
+        # 如果 global_checkpointer 为空（例如单测环境），兜底报错
+        if global_checkpointer is None:
+            raise RuntimeError("global_checkpointer is not initialized")
             
-            # 截获模型内部生成的事件流
-            async for event in graph.astream_events(inputs, config=config, version="v2"):
-                kind = event["event"]
-                tags = event.get("tags", [])
-                
-                if kind == "on_chat_model_stream":
-                    # 屏蔽子智能体内部的自言自语（防止在前端和主模型的话重复），仅透传主智能体
-                    if "subagent_run" in tags:
-                        continue
-                        
-                    chunk_content = event["data"]["chunk"].content
-                    if chunk_content:
-                        yield str(chunk_content)
-                elif kind == "on_tool_start":
-                    tool_name = event["name"]
-                    tool_input = event["data"].get("input", {})
+        graph = self._build_graph(global_checkpointer, mcp_tools)
+        
+        # 截获模型内部生成的事件流
+        async for event in graph.astream_events(inputs, config=config, version="v2"):
+            kind = event["event"]
+            tags = event.get("tags", [])
+            
+            if kind == "on_chat_model_stream":
+                # 屏蔽子智能体内部的自言自语（防止在前端和主模型的话重复），仅透传主智能体
+                if "subagent_run" in tags:
+                    continue
                     
-                    if "subagent_run" in tags:
-                        yield f"\n\n> ⚙️ [子进程] 调用工具: `{tool_name}`\n\n"
-                    else:
-                        yield f"\n\n> ⚙️ [主进程] 调用工具: `{tool_name}`\n> 参数: `{tool_input}`\n\n"
-                elif kind == "on_tool_end":
-                    if "subagent_run" in tags:
-                        yield f"> ✓ [子进程] 执行完毕\n\n"
-                    else:
-                        yield f"> ✓ [主进程] 执行完毕\n\n"
+                chunk_content = event["data"]["chunk"].content
+                if chunk_content:
+                    yield str(chunk_content)
+            elif kind == "on_tool_start":
+                tool_name = event["name"]
+                tool_input = event["data"].get("input", {})
+                
+                if "subagent_run" in tags:
+                    yield f"\n\n> ⚙️ [子进程] 调用工具: `{tool_name}`\n\n"
+                else:
+                    yield f"\n\n> ⚙️ [主进程] 调用工具: `{tool_name}`\n> 参数: `{tool_input}`\n\n"
+            elif kind == "on_tool_end":
+                if "subagent_run" in tags:
+                    yield f"> ✓ [子进程] 执行完毕\n\n"
+                else:
+                    yield f"> ✓ [主进程] 执行完毕\n\n"

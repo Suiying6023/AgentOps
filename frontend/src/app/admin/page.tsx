@@ -1,227 +1,263 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Key, Server, Activity, Plus, Shield, Cpu, RefreshCw, Edit2, CheckCircle2 } from "lucide-react";
-import { motion } from "framer-motion";
+import { Settings, Save, CheckCircle2, CloudFog, Loader2 } from "lucide-react";
 
-type ProviderKey = {
+import { api } from "@/lib/api";
+
+type RemoteModel = {
   id: string;
+  name: string;
   provider: string;
-  modelType: string;
-  key: string;
-  status: "connected" | "error";
-  latency: number;
 };
 
 export default function AdminDashboard() {
-  const [keys, setKeys] = useState<ProviderKey[]>([]);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([]);
+  const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set());
+  const [reviewModel, setReviewModel] = useState<string>("");
+  const [reviewMode, setReviewMode] = useState<string>("sequential");
+  const [subagentLow, setSubagentLow] = useState<string>("");
+  const [subagentMedium, setSubagentMedium] = useState<string>("");
+  const [subagentHigh, setSubagentHigh] = useState<string>("");
+  const [isFetching, setIsFetching] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
-    fetchProviders();
+    fetchConfigs();
   }, []);
 
-  const fetchProviders = async () => {
+  const fetchConfigs = async () => {
     try {
-      // 假设当前为未开启 Bearer Token 的测试环境，开启后需传入 headers: Authorization
-      const res = await fetch("http://localhost:8080/admin/providers");
-      const data = await res.json();
-      setKeys(data.map((item: any) => ({
-        id: item.provider,
-        provider: item.provider,
-        modelType: item.model_type || "N/A",
-        key: item.api_key.substring(0, 8) + "******************",
-        status: item.status,
-        latency: item.latency || 0
-      })));
+      const data = await api.getSystemConfig();
+      if (data.display_models) {
+        setEnabledModels(new Set(data.display_models));
+      }
+      if (data.review_model) {
+        setReviewModel(data.review_model);
+      }
+      if (data.review_mode) {
+        setReviewMode(data.review_mode);
+      }
+      if (data.subagent_model_low) setSubagentLow(data.subagent_model_low);
+      if (data.subagent_model_medium) setSubagentMedium(data.subagent_model_medium);
+      if (data.subagent_model_high) setSubagentHigh(data.subagent_model_high);
     } catch (e) {
-      console.error(e);
+      console.error("Failed to load configs", e);
     }
   };
 
-  const addNewProvider = async () => {
-    const providerName = prompt("请输入厂商名称 (例如 openai, deepseek, siliconflow):");
-    if (!providerName) return;
-    const apiKey = prompt(`请输入 ${providerName} 的 API Key:`);
-    if (!apiKey) return;
-    
-    setIsUpdating(true);
+  const handleFetchRemote = async () => {
+    setIsFetching(true);
     try {
-      await fetch("http://localhost:8080/admin/providers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: providerName,
-          api_key: apiKey,
-          model_type: "dynamic",
-          base_url: null
-        })
-      });
-      await fetchProviders();
+      const res = await api.fetchRemoteModels();
+      setRemoteModels(res.data || []);
     } catch (e) {
-      alert("添加失败");
+      alert("探测模型列表失败，请检查 .env 中的 API Key 是否正确配置");
     } finally {
-      setIsUpdating(false);
+      setIsFetching(false);
     }
   };
 
-  const deleteProvider = async (provider: string) => {
-    if (!confirm(`确定要移除 ${provider} 的配置吗？`)) return;
+  const toggleModel = (modelId: string) => {
+    const newSet = new Set(enabledModels);
+    if (newSet.has(modelId)) {
+      newSet.delete(modelId);
+    } else {
+      newSet.add(modelId);
+    }
+    setEnabledModels(newSet);
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveSuccess(false);
     try {
-      await fetch(`http://localhost:8080/admin/providers/${provider}`, { method: "DELETE" });
-      await fetchProviders();
+      const modelsArray = Array.from(enabledModels);
+      await api.updateSystemConfig("display_models", modelsArray);
+      await api.updateSystemConfig("review_model", reviewModel.trim());
+      await api.updateSystemConfig("review_mode", reviewMode);
+      await api.updateSystemConfig("subagent_model_low", subagentLow.trim());
+      await api.updateSystemConfig("subagent_model_medium", subagentMedium.trim());
+      await api.updateSystemConfig("subagent_model_high", subagentHigh.trim());
+      
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (e) {
-      alert("删除失败");
+      alert("保存失败");
+    } finally {
+      setIsSaving(false);
     }
   };
 
   return (
     <div className="flex h-screen font-sans bg-[#F9FAFB] text-black selection:bg-black selection:text-white">
-      
-      {/* 侧边栏 */}
-      <aside className="w-64 flex flex-col border-r border-gray-200 bg-white shadow-sm z-10">
-        <div className="p-6 flex items-center gap-3 border-b border-gray-100">
-          <div className="p-2 bg-black text-white rounded-lg shadow-md">
-            <Shield size={18} />
-          </div>
-          <h1 className="font-bold text-lg tracking-tight text-gray-900">管理页面</h1>
-        </div>
-        
-        <div className="flex-1 p-4 space-y-2">
-          <div className="text-xs font-semibold mb-3 px-3 text-gray-400 uppercase tracking-wider">系统配置</div>
-          <button className="w-full text-left px-4 py-3 rounded-xl text-sm flex items-center gap-3 bg-gray-100 text-black font-semibold transition-all">
-            <Server size={16} /> 上游模型网关
-          </button>
-          <button className="w-full text-left px-4 py-3 rounded-xl text-sm flex items-center gap-3 text-gray-500 hover:bg-gray-50 hover:text-black font-medium transition-all">
-            <Activity size={16} /> 成本与 Token 监控
-          </button>
-        </div>
-        
-        <div className="p-6 border-t border-gray-100 text-center">
-            <span className="text-[11px] text-gray-400 font-mono tracking-tighter bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
-              AGENTOPS V2.0
-            </span>
-        </div>
-      </aside>
-
-      {/* 主面板区 */}
       <main className="flex-1 overflow-y-auto bg-[#F9FAFB]">
-        <div className="max-w-5xl mx-auto p-10 space-y-8">
+        <div className="max-w-4xl mx-auto p-10 space-y-8">
           
-          <header>
-            <h2 className="text-3xl font-bold tracking-tight text-gray-900">模型网关配置</h2>
-            <p className="text-gray-500 mt-2 text-sm font-medium">管理大模型厂商的 API Key 与网络连通性。</p>
+          <header className="flex items-center justify-between">
+            <div>
+              <h2 className="text-3xl font-bold tracking-tight text-gray-900">系统环境配置</h2>
+              <p className="text-gray-500 mt-2 text-sm font-medium">通过探测云端可用模型，利用开关即可快速决定哪些模型对前台用户开放。</p>
+            </div>
+            <a 
+              href="/" 
+              className="p-2 text-gray-400 hover:text-black hover:bg-gray-200 bg-gray-100 rounded-lg transition-colors flex items-center justify-center"
+              title="返回对话"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            </a>
           </header>
 
-          {/* 核心指标卡片 */}
-          <div className="grid grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow cursor-default">
-              <div className="flex items-center gap-3 text-gray-500 mb-4">
-                <div className="p-2 bg-gray-50 rounded-lg"><Server size={18} className="text-black" /></div>
-                <span className="text-sm font-semibold uppercase tracking-wider">已接入厂商</span>
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mt-8 p-8 space-y-8">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Settings size={18} className="text-gray-400" />
+                  <h3 className="text-lg font-bold text-gray-900">显示模型名单配置</h3>
+                </div>
+                <button
+                  onClick={handleFetchRemote}
+                  disabled={isFetching}
+                  className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-md hover:bg-gray-800 transition-all disabled:opacity-70"
+                >
+                  {isFetching ? <Loader2 size={16} className="animate-spin" /> : <CloudFog size={16} />}
+                  探测云端可用模型
+                </button>
               </div>
-              <div className="text-4xl font-black text-gray-900">{keys.length}</div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow cursor-default">
-              <div className="flex items-center gap-3 text-gray-500 mb-4">
-                <div className="p-2 bg-gray-50 rounded-lg"><Activity size={18} className="text-black" /></div>
-                <span className="text-sm font-semibold uppercase tracking-wider">网关平均延迟</span>
-              </div>
-              <div className="text-4xl font-black text-gray-900">
-                {Math.round(keys.filter(k => k.status === 'connected').reduce((acc, curr) => acc + curr.latency, 0) / (keys.filter(k => k.status === 'connected').length || 1))} ms
-              </div>
-            </div>
 
-            <div className="bg-black text-white p-6 rounded-2xl shadow-xl flex flex-col justify-between relative overflow-hidden group">
-              <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:bg-white/20 transition-colors"></div>
-              <div className="flex items-center gap-3 text-gray-300 mb-4 relative z-10">
-                <div className="p-2 bg-white/10 rounded-lg"><Cpu size={18} className="text-white" /></div>
-                <span className="text-sm font-semibold uppercase tracking-wider">主脑路由状态</span>
-              </div>
-              <div className="text-4xl font-black text-white relative z-10 flex items-center gap-3">
-                <span className="w-3 h-3 bg-green-400 rounded-full shadow-[0_0_15px_rgba(74,222,128,0.5)] animate-pulse"></span>
-                ACTIVE
-              </div>
-            </div>
-          </div>
+              <p className="text-xs text-gray-500">点击按钮探测后，下方将列出通过 .env 环境中配置的各大厂目前能调用的所有模型。勾选后保存，前台即刻生效。</p>
+              
+              {remoteModels.length > 0 && (
+                <div className="mt-4 border border-gray-200 rounded-xl max-h-96 overflow-y-auto bg-gray-50 p-2">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-500">
+                        <th className="p-3 font-semibold w-1/4">厂商</th>
+                        <th className="p-3 font-semibold">模型 ID</th>
+                        <th className="p-3 font-semibold text-right w-24">是否启用</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {remoteModels.map((m) => (
+                        <tr key={m.id} className="hover:bg-gray-100/50 transition-colors">
+                          <td className="p-3 font-medium text-gray-900">{m.provider}</td>
+                          <td className="p-3 font-mono text-gray-600">{m.id}</td>
+                          <td className="p-3 text-right">
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                className="sr-only peer"
+                                checked={enabledModels.has(m.id)}
+                                onChange={() => toggleModel(m.id)}
+                              />
+                              <div className="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-black"></div>
+                            </label>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
-          {/* API Key 管理列表 */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden mt-8">
-            <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
-              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                API 密钥列表
-              </h3>
-              <button 
-                onClick={addNewProvider}
-                disabled={isUpdating}
-                className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-md hover:bg-gray-800 transition-colors disabled:opacity-70"
-              >
-                {isUpdating ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
-                添加供应商 Key
-              </button>
-            </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-white border-b border-gray-100 text-xs uppercase tracking-wider text-gray-500 font-semibold">
-                    <th className="p-5 font-semibold">供应商平台</th>
-                    <th className="p-5 font-semibold">支持模型映射</th>
-                    <th className="p-5 font-semibold">API Key</th>
-                    <th className="p-5 font-semibold">连通性状态</th>
-                    <th className="p-5 font-semibold">延迟</th>
-                    <th className="p-5 font-semibold text-right">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {keys.map((k) => (
-                    <motion.tr 
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      key={k.id} 
-                      className="hover:bg-gray-50 transition-colors group"
+              <div className="pt-8 border-t border-gray-100 mt-4 space-y-4">
+                <label className="block text-sm font-semibold text-gray-700">安全审查配置</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">安全审查模型</label>
+                    <select
+                      value={reviewModel}
+                      onChange={(e) => setReviewModel(e.target.value)}
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-black focus:outline-none focus:ring-2 focus:ring-black text-sm cursor-pointer"
                     >
-                      <td className="p-5 font-bold text-gray-900 flex items-center gap-2">
-                        {k.provider}
-                      </td>
-                      <td className="p-5">
-                        <div className="flex flex-wrap gap-1.5">
-                          {k.modelType.split(',').map(m => (
-                            <span key={m} className="px-2 py-1 bg-gray-100 text-gray-600 text-xs font-semibold rounded-md border border-gray-200">
-                              {m.trim()}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-5">
-                        <code className="bg-gray-100 px-2.5 py-1.5 rounded-md text-sm font-mono text-gray-500 border border-gray-200 select-all">{k.key}</code>
-                      </td>
-                      <td className="p-5">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
-                          k.status === 'connected' 
-                            ? "bg-green-50 text-green-700 border border-green-200" 
-                            : "bg-red-50 text-red-700 border border-red-200"
-                        }`}>
-                          {k.status === 'connected' ? <CheckCircle2 size={12} /> : null}
-                          {k.status === 'connected' ? '已连接' : '不可用'}
-                        </span>
-                      </td>
-                      <td className="p-5 text-gray-900 font-medium">
-                        {k.latency > 0 ? `${k.latency}ms` : '-'}
-                      </td>
-                      <td className="p-5 text-right">
-                        <button 
-                          onClick={() => deleteProvider(k.provider)}
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-1.5 ml-auto opacity-0 group-hover:opacity-100"
-                        >
-                          <Edit2 size={14} /> 移除配置
-                        </button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
+                      <option value="">-- 请选择审查模型 --</option>
+                      {reviewModel && !enabledModels.has(reviewModel) && (
+                        <option value={reviewModel}>{reviewModel} (当前, 未开启)</option>
+                      )}
+                      {Array.from(enabledModels).map(m => (
+                        <option key={`review-${m}`} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">审查执行模式</label>
+                    <select
+                      value={reviewMode}
+                      onChange={(e) => setReviewMode(e.target.value)}
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-black focus:outline-none focus:ring-2 focus:ring-black text-sm cursor-pointer"
+                    >
+                      <option value="sequential">串行执行 (安全稳定，推荐)</option>
+                      <option value="parallel">并行执行 (速度最快，需并发API支持)</option>
+                      <option value="off">关闭审查 (直接忽略安全性检测)</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">用于在后台默默检测用户提示词是否含有恶意注入的专属模型及运行模式策略。</p>
+              </div>
+
+              <div className="pt-8 border-t border-gray-100 mt-4 space-y-4">
+                <label className="block text-sm font-semibold text-gray-700">子智能体模型配置</label>
+                <p className="text-xs text-gray-500">为子智能体分配不同能力层级的专属模型。同样只能从已开启的模型中选择。</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">低难度 (Low)</label>
+                    <select
+                      value={subagentLow}
+                      onChange={(e) => setSubagentLow(e.target.value)}
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-black focus:outline-none focus:ring-2 focus:ring-black text-sm cursor-pointer"
+                    >
+                      <option value="">-- 请选择 --</option>
+                      {subagentLow && !enabledModels.has(subagentLow) && <option value={subagentLow}>{subagentLow} (未开启)</option>}
+                      {Array.from(enabledModels).map(m => <option key={`low-${m}`} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">中难度 (Medium)</label>
+                    <select
+                      value={subagentMedium}
+                      onChange={(e) => setSubagentMedium(e.target.value)}
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-black focus:outline-none focus:ring-2 focus:ring-black text-sm cursor-pointer"
+                    >
+                      <option value="">-- 请选择 --</option>
+                      {subagentMedium && !enabledModels.has(subagentMedium) && <option value={subagentMedium}>{subagentMedium} (未开启)</option>}
+                      {Array.from(enabledModels).map(m => <option key={`med-${m}`} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">高难度 (High)</label>
+                    <select
+                      value={subagentHigh}
+                      onChange={(e) => setSubagentHigh(e.target.value)}
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 text-black focus:outline-none focus:ring-2 focus:ring-black text-sm cursor-pointer"
+                    >
+                      <option value="">-- 请选择 --</option>
+                      {subagentHigh && !enabledModels.has(subagentHigh) && <option value={subagentHigh}>{subagentHigh} (未开启)</option>}
+                      {Array.from(enabledModels).map(m => <option key={`high-${m}`} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 pt-4">
+              <button
+                onClick={handleSave}
+                disabled={isSaving}
+                className="flex items-center gap-2 bg-black text-white px-6 py-3 rounded-xl text-sm font-semibold shadow-md hover:bg-gray-800 transition-all disabled:opacity-70"
+              >
+                <Save size={16} />
+                {isSaving ? "保存中..." : "保存配置"}
+              </button>
+              
+              {saveSuccess && (
+                <span className="text-green-600 flex items-center gap-1.5 text-sm font-medium animate-in fade-in slide-in-from-left-2">
+                  <CheckCircle2 size={16} /> 配置已保存
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -7,10 +7,10 @@ async def get_mcp_tools():
     返回的工具数组可以直接被 LangChain/LangGraph 引擎加载使用。
     """
     
-    # 动态获取 mcp_server.py 的绝对路径，保证启动路径无忧
+    # 动态获取 tools/mcp_server.py 的绝对路径，保证启动路径无忧
     current_dir = os.path.dirname(os.path.abspath(__file__))
     src_dir = os.path.dirname(current_dir)
-    mcp_script_path = os.path.join(src_dir, "mcp_server.py")
+    mcp_script_path = os.path.join(src_dir, "tools", "mcp_server.py")
     
     # 按照 MCP 规范配置客户端连接参数
     mcp_server_config = {

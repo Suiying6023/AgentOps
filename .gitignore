@@ -29,13 +29,9 @@ frontend/*.tsbuildinfo
 # AgentOps 开发期副产物 (强烈拒绝入库)
 # -------------------------
 # 1. 临时测试代码
-main.py
 debug_*.py
-test_*.py
 check_*.py
-pytest.ini
 sig.txt
-tests/
 
 # 2. 学习记录与规划文档
 概览/

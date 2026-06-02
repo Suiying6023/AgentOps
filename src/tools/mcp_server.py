@@ -1,7 +1,7 @@
 import sys
 import os
 # 把 src 目录加入环境变量，防止依赖导入失败
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server.fastmcp import FastMCP
 from tools.rag import search_knowledge_base

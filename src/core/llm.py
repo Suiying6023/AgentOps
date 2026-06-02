@@ -9,8 +9,6 @@ import asyncio
 import sys
 
 from core.settings import settings
-from schema import DeepseekModelName, FakeModelName, ModelName, OpenAIModelName, SiliconFlowModelName
-from core.config_manager import get_provider_key
 
 class ToolAwareFakeModel(FakeListChatModel):
     def bind_tools(self, tools, **kwargs):
@@ -93,62 +91,40 @@ class SiliconFlowChatOpenAI(ChatOpenAI):
         return super()._generate(messages, stop, run_manager, **kwargs)
 
 @cache
-def get_model(model_name: ModelName | None = None) -> BaseChatModel:
-    """根据传入的模型名称动态实例化并返回对应的 LangChain ChatModel。
-    （已恢复 @cache，并使用 LangChain 原生 with_fallbacks 机制实现主备 Key 切换）
-    """
+def get_model(model_name: str | None = None) -> BaseChatModel:
+    """根据传入的模型名称动态实例化并返回对应的 LangChain ChatModel。"""
     # 如果没有指定模型，则使用 settings 中的默认模型
-    target_model = model_name or settings.DEFAULT_MODEL
-    print(f"\n[DEBUG get_model] model_name: {model_name}, settings.DEFAULT_MODEL: {settings.DEFAULT_MODEL}, target_model: {target_model}", file=sys.stderr)
+    target_model_full = model_name or settings.DEFAULT_MODEL
+    
+    if "/" in target_model_full:
+        provider, target_model = target_model_full.split("/", 1)
+    else:
+        provider = "default"
+        target_model = target_model_full
 
-    # 1. 处理模拟模型 (用于无网本地快速测试)
-    if target_model == FakeModelName.FAKE:
-        return ToolAwareFakeModel(responses=["这是一条来自 FakeModel 的模拟测试回复。"])
+    api_key = ""
+    base_url = None
 
-    # 2. 处理 OpenAI 模型
-    if target_model in list(OpenAIModelName):
-        api_key = get_provider_key("openai") or (settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else "")
-        return ChatOpenAI(
-            model=target_model,
-            api_key=cast(str, api_key),
-            temperature=0.5,
-        )
+    if provider == "openai":
+        api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else ""
+        base_url = settings.OPENAI_BASE_URL
+    elif provider == "deepseek":
+        api_key = settings.DEEPSEEK_API_KEY.get_secret_value() if settings.DEEPSEEK_API_KEY else ""
+        base_url = settings.DEEPSEEK_BASE_URL
+    elif provider == "siliconflow":
+        api_key = settings.SILICONFLOW_PRIMARY_KEY.get_secret_value() if settings.SILICONFLOW_PRIMARY_KEY else ""
+        base_url = settings.SILICONFLOW_BASE_URL
+    else:
+        # 兜底旧逻辑，防止未识别厂商报错
+        api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else ""
+        base_url = None
 
-    # 3. 处理 DeepSeek 模型 (兼容 OpenAI 接口格式)
-    if target_model in list(DeepseekModelName):
-        api_key = get_provider_key("deepseek") or (settings.DEEPSEEK_API_KEY.get_secret_value() if settings.DEEPSEEK_API_KEY else "")
-        return ChatOpenAI(
-            model=target_model,
-            api_key=cast(str, api_key),
-            base_url="https://api.deepseek.com/v1",
-            temperature=0.5,
-        )
-
-    # 4. 处理硅基流动 (SiliconFlow) 模型，加入主备 fallback 机制
-    if target_model in list(SiliconFlowModelName):
-        api_key = get_provider_key("siliconflow") or (settings.SILICONFLOW_PRIMARY_KEY.get_secret_value() if settings.SILICONFLOW_PRIMARY_KEY else "")
-        primary_model = SiliconFlowChatOpenAI(
-            model=target_model,
-            api_key=cast(str, api_key),
-            base_url="https://api.siliconflow.cn/v1",
-            temperature=0.6,
-        )
-        
-        fallback_key = get_provider_key("siliconflow_fallback") or (settings.SILICONFLOW_FALLBACK_KEY.get_secret_value() if settings.SILICONFLOW_FALLBACK_KEY else "")
-        if fallback_key:
-            fallback_model = SiliconFlowChatOpenAI(
-                model=target_model,
-                api_key=cast(str, fallback_key),
-                base_url="https://api.siliconflow.cn/v1",
-                temperature=0.6,
-            )
-            # 使用 LangChain 的原生 fallbacks 机制：主模型报错时，自动降级到备用模型
-            return primary_model.with_fallbacks([fallback_model])
-            
-        return primary_model
-
-    # 兜底报错机制（理论上在 schema 层就会被拦截，但工厂内部保留防御性编程）
-    raise ValueError(f"不受支持的模型名称: {target_model}")
+    return SiliconFlowChatOpenAI(
+        model=target_model,
+        api_key=cast(str, api_key) if api_key else "empty",
+        base_url=base_url,
+        temperature=0.6,
+    )
 
 
 @cache
@@ -176,7 +152,7 @@ def get_embeddings() -> Embeddings:
         from langchain_openai import OpenAIEmbeddings
         from typing import cast
         
-        api_key = cast(str, settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else "sk-NoCIP2lKzL1SxctciLVOF6W0Jsp5qs1UxZ09Wvi8kPQY73rK")
+        api_key = cast(str, settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else "")
         print("🔧 初始化在线 Embedding 模型 (qwen3-embedding-8b)", file=sys.stderr)
         
         return OpenAIEmbeddings(

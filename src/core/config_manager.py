@@ -1,3 +1,4 @@
+import json
 import logging
 import psycopg
 from psycopg.rows import dict_row
@@ -5,84 +6,107 @@ from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# 内存缓存，降低 get_model() 耗时并简化同步调用
-PROVIDER_CACHE = {}
+SYSTEM_CONFIG_CACHE = {}
 
 def init_db():
-    """初始化数据库表"""
+    """初始化系统配置表"""
     conn_str = settings.postgres_uri.replace("+psycopg", "")
     try:
         with psycopg.connect(conn_str) as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    CREATE TABLE IF NOT EXISTS provider_configs (
-                        provider VARCHAR(50) PRIMARY KEY,
-                        api_key TEXT NOT NULL,
-                        base_url TEXT,
-                        model_type TEXT,
-                        status VARCHAR(20) DEFAULT 'connected',
-                        latency INTEGER DEFAULT 0,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    CREATE TABLE IF NOT EXISTS system_configs (
+                        key VARCHAR(50) PRIMARY KEY,
+                        value TEXT NOT NULL
                     )
                 """)
+                
+                # 初始化默认的显示模型列表
+                cur.execute("SELECT COUNT(*) FROM system_configs WHERE key = 'display_models'")
+                if cur.fetchone()[0] == 0:
+                    default_models = [
+                        "siliconflow/deepseek-ai/DeepSeek-V3",
+                        "siliconflow/deepseek-ai/DeepSeek-R1",
+                        "siliconflow/Qwen/Qwen2.5-7B-Instruct"
+                    ]
+                    cur.execute("INSERT INTO system_configs (key, value) VALUES (%s, %s)", 
+                               ("display_models", json.dumps(default_models, ensure_ascii=False)))
+                
+                # 初始化默认的裁判模型
+                cur.execute("SELECT COUNT(*) FROM system_configs WHERE key = 'review_model'")
+                if cur.fetchone()[0] == 0:
+                    cur.execute("INSERT INTO system_configs (key, value) VALUES (%s, %s)", 
+                               ("review_model", "siliconflow/Qwen/Qwen2.5-7B-Instruct"))
+
+                # 初始化子智能体低中高配置
+                sub_defaults = {
+                    "subagent_model_low": "siliconflow/Qwen/Qwen2.5-7B-Instruct",
+                    "subagent_model_medium": "siliconflow/deepseek-ai/DeepSeek-V3",
+                    "subagent_model_high": "siliconflow/deepseek-ai/DeepSeek-R1",
+                    "review_mode": "sequential"
+                }
+                for skey, sval in sub_defaults.items():
+                    cur.execute("SELECT COUNT(*) FROM system_configs WHERE key = %s", (skey,))
+                    if cur.fetchone()[0] == 0:
+                        cur.execute("INSERT INTO system_configs (key, value) VALUES (%s, %s)", (skey, sval))
+                               
             conn.commit()
     except Exception as e:
-        logger.error(f"Failed to init provider_configs table: {e}")
+        logger.error(f"Failed to init system_configs table: {e}")
 
 def load_configs():
     """从数据库加载最新配置到内存"""
-    global PROVIDER_CACHE
+    global SYSTEM_CONFIG_CACHE
     conn_str = settings.postgres_uri.replace("+psycopg", "")
     try:
         with psycopg.connect(conn_str, row_factory=dict_row) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM provider_configs")
+                cur.execute("SELECT * FROM system_configs")
                 rows = cur.fetchall()
                 
-                # 刷新整个字典
                 new_cache = {}
                 for row in rows:
-                    new_cache[row["provider"]] = row
-                PROVIDER_CACHE.clear()
-                PROVIDER_CACHE.update(new_cache)
+                    if row["key"] == "display_models":
+                        try:
+                            new_cache[row["key"]] = json.loads(row["value"])
+                        except json.JSONDecodeError:
+                            new_cache[row["key"]] = []
+                    else:
+                        new_cache[row["key"]] = row["value"]
                 
-        logger.info(f"Loaded {len(PROVIDER_CACHE)} provider configs from PostgreSQL.")
+                SYSTEM_CONFIG_CACHE.clear()
+                SYSTEM_CONFIG_CACHE.update(new_cache)
+                
+        logger.info(f"Loaded system configs from PostgreSQL.")
     except Exception as e:
-        logger.error(f"Failed to load provider configs: {e}")
+        logger.error(f"Failed to load system configs: {e}")
 
-def get_provider_key(provider: str) -> str | None:
-    """获取厂商 API Key，优先读库，读不到返回 None (触发 fallback 到 .env)"""
-    config = PROVIDER_CACHE.get(provider)
-    if config:
-        return config["api_key"]
-    return None
+def get_system_config(key: str, default=None):
+    if not SYSTEM_CONFIG_CACHE:
+        load_configs()
+    return SYSTEM_CONFIG_CACHE.get(key, default)
 
-def upsert_provider(provider: str, api_key: str, model_type: str = "", base_url: str | None = None):
-    """Admin 控制台保存/更新 Key 的接口"""
+def get_all_system_configs():
+    if not SYSTEM_CONFIG_CACHE:
+        load_configs()
+    return dict(SYSTEM_CONFIG_CACHE)
+
+def update_system_config(key: str, value: any):
     conn_str = settings.postgres_uri.replace("+psycopg", "")
+    
+    # 格式化存储
+    if isinstance(value, list) or isinstance(value, dict):
+        value_str = json.dumps(value, ensure_ascii=False)
+    else:
+        value_str = str(value)
+        
     with psycopg.connect(conn_str) as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO provider_configs (provider, api_key, model_type, base_url, updated_at)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (provider) DO UPDATE 
-                SET api_key = EXCLUDED.api_key,
-                    model_type = EXCLUDED.model_type,
-                    base_url = EXCLUDED.base_url,
-                    status = 'connected',
-                    updated_at = CURRENT_TIMESTAMP
-            """, (provider, api_key, model_type, base_url))
-        conn.commit()
-    # 写完库马上热更新缓存
-    load_configs()
-
-def delete_provider(provider: str):
-    conn_str = settings.postgres_uri.replace("+psycopg", "")
-    with psycopg.connect(conn_str) as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM provider_configs WHERE provider = %s", (provider,))
+                INSERT INTO system_configs (key, value)
+                VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE 
+                SET value = EXCLUDED.value
+            """, (key, value_str))
         conn.commit()
     load_configs()
-
-def get_all_providers() -> list[dict]:
-    return list(PROVIDER_CACHE.values())
