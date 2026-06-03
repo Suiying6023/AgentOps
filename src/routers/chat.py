@@ -5,13 +5,12 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from core.auth import verify_bearer
-from core.memory import chat_history_store
+from db.chat_history import chat_history_store
 from core.guardrails import judge_injection_async
-from core.schema import ChatMessage, StreamInput, UserInput
+from schemas.api_models import ChatMessage, StreamInput, UserInput
 from agents.graph_agent import GraphAgent
 
-router = APIRouter(prefix="/chat", dependencies=[Depends(verify_bearer)])
+router = APIRouter(prefix="/chat")
 
 # 单例化全局 GraphAgent (不再需要 factory / registry 模式)
 agent = GraphAgent()
@@ -22,7 +21,7 @@ async def invoke_agent(user_input: UserInput) -> ChatMessage:
     
     from core.lock import ThreadConcurrencyLock
     async with ThreadConcurrencyLock(thread_id):
-        history = chat_history_store.get_messages(thread_id)
+        history = await chat_history_store.get_messages(thread_id)
 
     human_message = ChatMessage(
         type="human",
@@ -55,7 +54,7 @@ async def invoke_agent(user_input: UserInput) -> ChatMessage:
         },
     )
 
-    chat_history_store.append_messages(thread_id, [human_message, ai_message])
+    await chat_history_store.append_messages(thread_id, [human_message, ai_message])
     return ai_message
 
 @router.post("/stream")
@@ -66,7 +65,7 @@ async def stream_agent(user_input: StreamInput):
     lock = ThreadConcurrencyLock(thread_id)
     await lock.acquire()
 
-    history = chat_history_store.get_messages(thread_id)
+    history = await chat_history_store.get_messages(thread_id)
 
     human_message = ChatMessage(
         type="human",
@@ -76,15 +75,15 @@ async def stream_agent(user_input: StreamInput):
             "user_id": user_input.user_id,
         },
     )
-    chat_history_store.append_messages(thread_id, [human_message])
+    await chat_history_store.append_messages(thread_id, [human_message])
 
     async def generate():
         try:
             reply_chunks = []
             run_id = str(uuid4())
             
-            from core.config_manager import get_system_config
-            review_mode = get_system_config("review_mode", "sequential")
+            from db.config_dao import get_system_config
+            review_mode = await get_system_config("review_mode", "sequential")
             
             is_malicious = False
             judge_task = None
@@ -112,7 +111,7 @@ async def stream_agent(user_input: StreamInput):
                     run_id=run_id,
                     metadata={"thread_id": thread_id, "user_id": user_input.user_id},
                 )
-                chat_history_store.append_messages(thread_id, [ai_message])
+                await chat_history_store.append_messages(thread_id, [ai_message])
                 yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
                 return
 
@@ -158,7 +157,7 @@ async def stream_agent(user_input: StreamInput):
                     "user_id": user_input.user_id,
                 },
             )
-            chat_history_store.append_messages(thread_id, [ai_message])
+            await chat_history_store.append_messages(thread_id, [ai_message])
             yield f"data: {json.dumps({'type': 'done', 'content': ''})}\n\n"
 
         finally:
@@ -168,68 +167,49 @@ async def stream_agent(user_input: StreamInput):
 
 @router.get("/models")
 async def get_available_models():
-    """并发探测可用模型。如果没有配置显示列表，则返回所有探测到的模型，防止无模型可用。"""
+    """探测可用模型。如果没有配置显示列表，则返回所有探测到的模型，防止无模型可用。"""
     from core.settings import settings
-    from core.config_manager import get_system_config
+    from db.config_dao import get_system_config
     
-    display_models = get_system_config("display_models", [])
+    display_models = await get_system_config("display_models", [])
     display_set = set(display_models) if display_models else None
     
-    providers = []
-    if settings.OPENAI_API_KEY:
-        providers.append({"provider": "openai", "api_key": settings.OPENAI_API_KEY.get_secret_value(), "base_url": settings.OPENAI_BASE_URL})
-    if settings.DEEPSEEK_API_KEY:
-        providers.append({"provider": "deepseek", "api_key": settings.DEEPSEEK_API_KEY.get_secret_value(), "base_url": settings.DEEPSEEK_BASE_URL})
-    if settings.SILICONFLOW_PRIMARY_KEY:
-        providers.append({"provider": "siliconflow", "api_key": settings.SILICONFLOW_PRIMARY_KEY.get_secret_value(), "base_url": settings.SILICONFLOW_BASE_URL})
-
+    api_key = settings.LLM_API_KEY.get_secret_value() if settings.LLM_API_KEY else ""
+    base_url = settings.LLM_BASE_URL
+    url = base_url.rstrip("/") + "/models"
+    
     available_models = []
     
-    async def fetch_models(provider_cfg):
-        provider_name = provider_cfg["provider"]
-        api_key = provider_cfg["api_key"]
-        base_url = provider_cfg["base_url"]
-                
-        url = base_url.rstrip("/") + "/models"
-        
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
-                resp.raise_for_status()
-                data = resp.json()
-                models = data.get("data", [])
-                for m in models:
-                    model_id = m.get("id")
-                    if model_id:
-                        full_id = f"{provider_name}/{model_id}"
-                        # 严格遵守白名单：只有开启的模型才能显示。如果没开启任何模型，不返回任何模型。
-                        if display_set and (full_id in display_set or model_id in display_set):
-                            available_models.append({
-                                "id": full_id,
-                                "name": model_id,
-                                "provider": provider_name
-                            })
-        except Exception as e:
-            print(f"[Chat 探测失败] 无法获取 {provider_name} 的模型列表: {e}")
-
-    if providers and display_set:
-        await asyncio.gather(*(fetch_models(p) for p in providers))
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+            resp.raise_for_status()
+            data = resp.json()
+            models = data.get("data", [])
+            for m in models:
+                model_id = m.get("id")
+                if model_id:
+                    # 严格遵守白名单：只有开启的模型才能显示。如果没开启任何模型，全量返回。
+                    if display_set and model_id not in display_set:
+                        continue
+                    available_models.append({
+                        "id": model_id,
+                        "name": model_id,
+                        "provider": "default"
+                    })
+    except Exception as e:
+        print(f"[Chat 探测失败] 无法获取模型列表: {e}")
     
     fetched_ids = {m["id"] for m in available_models}
     
     # 兜底：如果设置了显示模型，但因为网络原因没探测到，强行加上
     if display_models:
-        for model_full in display_models:
-            if model_full not in fetched_ids:
-                if "/" in model_full:
-                    provider, model_id = model_full.split("/", 1)
-                else:
-                    provider = "default"
-                    model_id = model_full
+        for model_id in display_models:
+            if model_id not in fetched_ids:
                 available_models.append({
-                    "id": model_full,
+                    "id": model_id,
                     "name": model_id,
-                    "provider": provider
+                    "provider": "default"
                 })
     
     available_models.sort(key=lambda x: (x["provider"], x["name"]))

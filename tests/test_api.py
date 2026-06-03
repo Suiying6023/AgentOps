@@ -42,7 +42,7 @@ async def test_stream_endpoint(async_client):
                     pass
 
     assert chunks_received > 0, "必须接收到不止一个文字碎片，否则流式失效！"
-    print(f"\n[Stream 测试通过] 成功接收到 {chunks_received} 个字符碎片！")
+    print(f"\n[Stream 测试通过] 成功接收到 {chunks_received} 个字符碎片。")
     
     import asyncio
     await asyncio.sleep(0.2)
@@ -55,7 +55,7 @@ async def test_weather_tool_stream(async_client):
         "thread_id": "test_weather_123"
     }
     
-    print("\n\n📡 [开始测试 ReAct 工具调用] 提问：北京今天天气怎么样？")
+    print("\n\n[开始测试 ReAct 工具调用] 提问：北京今天天气怎么样？")
     print("-" * 50)
     
     chunks_received = 0
@@ -72,7 +72,7 @@ async def test_weather_tool_stream(async_client):
                     chunks_received += 1
                 elif data["type"] == "done":
                     print("\n" + "-" * 50)
-                    print("✅ [流式传输结束]")
+                    print("[流式传输结束]")
 
     assert chunks_received > 0, "必须接收到文字碎片，否则模型未能正确反馈工具结果！"
     
@@ -118,7 +118,7 @@ async def test_thread_management(async_client):
 @pytest.mark.asyncio
 async def test_review_mode(async_client):
     """测试不同审查模式的切换逻辑"""
-    from core.config_manager import init_db
+    from db.config_dao import init_db
     import psycopg
     from core.settings import settings
     

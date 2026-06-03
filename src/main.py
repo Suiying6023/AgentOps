@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from core.schema import ServiceMetadata
+from schemas.api_models import ServiceMetadata
 from routers.admin import router as admin_router
 from routers.knowledge import router as knowledge_router
 from routers.history import router as history_router
@@ -16,13 +16,13 @@ from routers.chat import router as chat_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from core.config_manager import init_db, load_configs
+    from db.config_dao import init_db, load_configs
     # 初始化配置表并加载
-    init_db()
-    load_configs()
+    await init_db()
+    await load_configs()
     
     # 初始化全局 LangGraph Checkpointer
-    from core.memory import init_global_checkpointer, close_global_checkpointer
+    from db.chat_history import init_global_checkpointer, close_global_checkpointer
     await init_global_checkpointer()
     
     yield

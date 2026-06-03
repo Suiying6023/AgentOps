@@ -12,10 +12,8 @@ import asyncio
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
 from core.llm import get_model
-from core.schema import ChatMessage, UserInput
+from schemas.api_models import ChatMessage, UserInput
 
 # 动态挂载外部的微服务工具。
 
@@ -27,7 +25,7 @@ class AgentState(TypedDict):
     # 我们把用户选择的模型名也放进状态里，供后续的 Node 读取
     model_name: str
     # 由主管动态决定的子智能体复杂度级别
-    subagent_complexity: NotRequired[Literal["simple", "complex"]]
+    subagent_complexity: NotRequired[Literal["low", "medium", "high"]]
 
 
 class GraphAgent:
@@ -55,21 +53,19 @@ class GraphAgent:
         async def create_subagent(task: str, complexity: str) -> str:
             """创建一个独立的后台子智能体来处理特定任务（如耗时检索、深入推理、并行子任务），并返回其执行结果报告。"""
             from langgraph.prebuilt import create_react_agent
-            from core.config_manager import get_system_config
-            display_models = get_system_config("display_models", [])
+            from db.config_dao import get_system_config
+            display_models = await get_system_config("display_models", [])
             
             # 从配置中获取管理员设置的子智能体模型
-            sub_model_name = get_system_config(f"subagent_model_{complexity}")
+            sub_model_name = await get_system_config(f"subagent_model_{complexity}")
             
             # 兜底：如果配置为空或者未在开启列表中，则优先回退到第一个可用模型，否则硬编码兜底
             if not sub_model_name or (display_models and sub_model_name not in display_models):
                 if display_models:
                     sub_model_name = display_models[0]
                 else:
-                    if complexity == "high":
-                        sub_model_name = "siliconflow/deepseek-ai/DeepSeek-R1"
-                    else:
-                        sub_model_name = "siliconflow/deepseek-ai/DeepSeek-V3"
+                    from core.llm import get_fallback_model_id
+                    sub_model_name = await get_fallback_model_id()
 
             sub_model = get_model(sub_model_name)
             
@@ -94,6 +90,15 @@ class GraphAgent:
         # 1. 主模型推理节点
         async def agent_node(state: AgentState):
             model_name = state.get("model_name")
+            if not model_name:
+                from db.config_dao import get_system_config
+                from core.llm import get_fallback_model_id
+                display_models = await get_system_config("display_models", [])
+                if display_models:
+                    model_name = display_models[0]
+                else:
+                    model_name = await get_fallback_model_id()
+                        
             model = get_model(model_name).bind_tools(all_tools)
             
             sys_msg = SystemMessage(content="""你是主智能体 AgentOps。
@@ -157,7 +162,7 @@ class GraphAgent:
         from core.mcp_client import get_mcp_tools
         mcp_tools = await get_mcp_tools()
         
-        from core.memory import global_checkpointer
+        from db.chat_history import global_checkpointer
         
         # 如果 global_checkpointer 为空（例如单测环境），兜底报错
         if global_checkpointer is None:
@@ -183,9 +188,9 @@ class GraphAgent:
                 tool_input = event["data"].get("input", {})
                 
                 if "subagent_run" in tags:
-                    yield f"\n\n> ⚙️ [子进程] 调用工具: `{tool_name}`\n\n"
+                    yield f"\n\n> [子进程] 调用工具: `{tool_name}`\n\n"
                 else:
-                    yield f"\n\n> ⚙️ [主进程] 调用工具: `{tool_name}`\n> 参数: `{tool_input}`\n\n"
+                    yield f"\n\n> [主进程] 调用工具: `{tool_name}`\n> 参数: `{tool_input}`\n\n"
             elif kind == "on_tool_end":
                 if "subagent_run" in tags:
                     yield f"> ✓ [子进程] 执行完毕\n\n"

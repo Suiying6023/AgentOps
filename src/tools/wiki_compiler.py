@@ -1,5 +1,7 @@
 import os
 import sys
+import asyncio
+import aiofiles
 from datetime import datetime
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
@@ -7,6 +9,7 @@ from langchain_core.tools import tool
 
 # 独立于向量库的纯文本存储区
 WIKI_DIR = "data/wiki_base"
+_wiki_lock = asyncio.Lock()
 
 class WikiPage(BaseModel):
     title: str = Field(description="页面的核心概念或实体名称，例如 'AgentOps架构' 或 '张三的履历'")
@@ -16,7 +19,7 @@ class WikiPage(BaseModel):
 class WikiExtraction(BaseModel):
     pages: list[WikiPage] = Field(description="从原文中提取出的独立且高价值的维基百科页面列表")
 
-def compile_document_to_wiki(file_path: str):
+async def compile_document_to_wiki(file_path: str):
     """将文档编译为结构化 Markdown 页面集合"""
     from core.llm import get_model
     os.makedirs(WIKI_DIR, exist_ok=True)
@@ -24,16 +27,19 @@ def compile_document_to_wiki(file_path: str):
     print(f"[Wiki] 读取文件: {file_path}", file=sys.stderr)
     
     if file_path.endswith(".pdf"):
+        # PDF loader 暂保留同步调用，因为 langchain_community.document_loaders 缺乏原生异步
         from langchain_community.document_loaders import PyPDFLoader
         loader = PyPDFLoader(file_path)
         docs = loader.load()
         text = "\n".join([doc.page_content for doc in docs])
     else:
-        with open(file_path, "r", encoding="utf-8") as f:
-            text = f.read()
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            text = await f.read()
             
     # 配置模型结构化输出
-    llm = get_model()
+    from core.llm import get_fallback_model_id
+    model_name = await get_fallback_model_id()
+    llm = get_model(model_name)
     try:
         structured_llm = llm.with_structured_output(WikiExtraction)
     except NotImplementedError:
@@ -55,7 +61,7 @@ def compile_document_to_wiki(file_path: str):
         from langchain_core.documents import Document
         vector_store = get_vector_store()
         
-        extraction = structured_llm.invoke([HumanMessage(content=prompt)])
+        extraction = await structured_llm.ainvoke([HumanMessage(content=prompt)])
         wiki_docs = []
         
         for page in extraction.pages:
@@ -66,14 +72,15 @@ def compile_document_to_wiki(file_path: str):
             # YAML Frontmatter 元数据头部
             frontmatter = f"---\ntitle: {page.title}\nupdated_at: {datetime.now().isoformat()}\ntags: [{', '.join(page.tags)}]\n---\n\n"
             
-            if os.path.exists(page_path):
-                # 追加写入已存在的页面
-                with open(page_path, "a", encoding="utf-8") as f:
-                    f.write("\n\n## 🔄 系统追加入库信息\n")
-                    f.write(page.content)
-            else:
-                with open(page_path, "w", encoding="utf-8") as f:
-                    f.write(frontmatter + page.content)
+            async with _wiki_lock:
+                if os.path.exists(page_path):
+                    # 追加写入已存在的页面
+                    async with aiofiles.open(page_path, "a", encoding="utf-8") as f:
+                        await f.write("\n\n## 🔄 系统追加入库信息\n")
+                        await f.write(page.content)
+                else:
+                    async with aiofiles.open(page_path, "w", encoding="utf-8") as f:
+                        await f.write(frontmatter + page.content)
                     
             print(f"[Wiki] 写入页面: {page_path}", file=sys.stderr)
             
@@ -85,7 +92,7 @@ def compile_document_to_wiki(file_path: str):
             
         # 写入向量库
         if wiki_docs:
-            vector_store.add_documents(wiki_docs)
+            await vector_store.aadd_documents(wiki_docs)
             print(f"[Wiki] 成功建立 {len(wiki_docs)} 个实体的语义寻址向量索引", file=sys.stderr)
             
         print("[Wiki] 编译完成", file=sys.stderr)
@@ -93,7 +100,7 @@ def compile_document_to_wiki(file_path: str):
         print(f"[Wiki] 编译异常: {e}", file=sys.stderr)
 
 @tool
-def search_llm_wiki(query: str) -> str:
+async def search_llm_wiki(query: str) -> str:
     """搜索 Wiki 页面内容。
     
     Args:
@@ -106,7 +113,7 @@ def search_llm_wiki(query: str) -> str:
         print(f"[Wiki Search] 正在使用 PGVector 语义寻址 Wiki 词条: {query}", file=sys.stderr)
         
         # 通过语义搜索向量库，扩大召回面
-        results = vector_store.similarity_search(query, k=10)
+        results = await vector_store.asimilarity_search(query, k=10)
         
         wiki_hits = []
         seen_paths = set()
@@ -118,8 +125,9 @@ def search_llm_wiki(query: str) -> str:
                 if path and path not in seen_paths and os.path.exists(path):
                     seen_paths.add(path)
                     # 反向定位到物理文件，读取100%全貌的完整 Markdown 词条！
-                    with open(path, "r", encoding="utf-8") as f:
-                        wiki_hits.append(f"【Wiki 完整结构化词条：{doc.metadata.get('wiki_title', '未知')}】\n{f.read()}")
+                    async with aiofiles.open(path, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        wiki_hits.append(f"【Wiki 完整结构化词条：{doc.metadata.get('wiki_title', '未知')}】\n{content}")
                         
         if not wiki_hits:
             return f"Wiki 库中未找到与 '{query}' 高度相关的结构化词条。"

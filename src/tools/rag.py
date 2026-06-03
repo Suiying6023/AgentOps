@@ -45,7 +45,6 @@ def ingest_document(file_path: str):
         header_split_docs = markdown_splitter.split_text(text)
         
         # 针对每个标题块内部，如果过长则进一步切分，同时继承标题元数据
-        # 针对每个标题块内部，如果过长则进一步切分，同时继承标题元数据
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         docs = text_splitter.split_documents(header_split_docs)
         
@@ -60,20 +59,21 @@ def ingest_document(file_path: str):
     print(f"成功将 {file_path} 存入 PostgreSQL 向量数据库！", file=sys.stderr)
 
 @tool
-def search_knowledge_base(query: str) -> str:
+async def search_knowledge_base(query: str) -> str:
     """当你被问到任何需要查阅资料、事实核查或你不确定的问题时，必须调用此工具检索本地资料库。
     如果你无法通过常识回答，或者需要引用权威资料，请使用此工具。
     
     Args:
         query: 用户的原始检索需求或口语化提问
     """
-    from core.llm import get_model
+    from core.llm import get_model, get_fallback_model_id
     from langchain_core.messages import SystemMessage
     
     # ==========================================
     # Query Rewriting (提问重写)
     # ==========================================
-    llm = get_model()
+    model_name = await get_fallback_model_id()
+    llm = get_model(model_name)
     
     rewrite_prompt = f"""你当前作为一个专业的信息检索助手，正在为一个底层 RAG 向量知识库重写搜索关键词。
 用户在提问时，经常会携带很多发号施令的口语，或者直接提及“系统”、“知识库”、“RAG”、“向量库”、“查一下”等执行层面的背景指令。
@@ -90,7 +90,7 @@ def search_knowledge_base(query: str) -> str:
     try:
         # 使用 HumanMessage 传递 prompt
         from langchain_core.messages import HumanMessage
-        response = llm.invoke([HumanMessage(content=rewrite_prompt)])
+        response = await llm.ainvoke([HumanMessage(content=rewrite_prompt)])
         rewritten_query = response.content.strip()
         
         # 如果重写为空则使用原句
@@ -106,8 +106,9 @@ def search_knowledge_base(query: str) -> str:
     # 使用重写后的查询词请求向量数据库
     vector_store = get_vector_store()
     
+    import asyncio
     try:
-        results = vector_store.similarity_search(rewritten_query, k=4)
+        results = await asyncio.to_thread(vector_store.similarity_search, rewritten_query, k=4)
     except Exception as e:
         return f"知识库服务暂时不可用，原因: {str(e)}"
         
@@ -120,11 +121,11 @@ def search_knowledge_base(query: str) -> str:
     graded_results = []
     
     try:
-        import requests
+        import httpx
         from core.settings import settings
         
-        api_key = settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else ""
-        url = settings.GEMAI_BASE_URL.replace("/v1", "") + "/v1/rerank"
+        api_key = settings.EMBEDDING_API_KEY.get_secret_value() if settings.EMBEDDING_API_KEY else ""
+        url = settings.EMBEDDING_BASE_URL.replace("/v1", "") + "/v1/rerank"
         
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -134,12 +135,14 @@ def search_knowledge_base(query: str) -> str:
         # 批处理 Reranker 评估
         documents = [doc.page_content for doc in results]
         payload = {
-            "model": settings.GEMAI_RERANKER_MODEL,
+            "model": settings.RERANKER_MODEL,
             "query": rewritten_query,
             "documents": documents
         }
         
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            
         if response.status_code == 200:
             rerank_data = response.json().get("results", [])
             print(f"\n[RAG] Reranker 出分:", file=sys.stderr)

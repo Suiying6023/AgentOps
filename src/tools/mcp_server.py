@@ -13,8 +13,8 @@ mcp = FastMCP("AgentOps_Microservice")
 # 2. 暴露知识库检索为 MCP Tool
 @mcp.tool()
 def search_knowledge(query: str) -> str:
-    """当你被问到任何需要查阅资料、事实核查或你不确定的问题时，必须调用此工具检索本地资料库。
-    如果你无法通过常识回答，或者需要引用权威资料，请使用此工具。
+    """无论你是否知道答案，回答任何客观知识、事实性问题或特定领域内容前，必须优先调用此工具检索本地资料库。
+    严禁直接依赖你的常识作答！
     """
     try:
         from tools.rag import search_knowledge_base

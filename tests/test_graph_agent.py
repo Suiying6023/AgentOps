@@ -5,7 +5,7 @@ import asyncio
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from agents.graph_agent import GraphAgent
-from core.schema import UserInput
+from schemas.api_models import UserInput
 
 import pytest
 

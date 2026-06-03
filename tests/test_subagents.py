@@ -3,7 +3,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_subagent_tool_mock():
     """测试创建子智能体的基本配置获取与调用逻辑"""
-    from core.config_manager import init_db
+    from db.config_dao import init_db
     import psycopg
     from core.settings import settings
 

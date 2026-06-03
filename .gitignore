@@ -7,6 +7,15 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# -------------------------
+# IDE / 编辑器配置
+# -------------------------
+.vscode/
+.idea/
 
 # -------------------------
 # Node.js / Next.js

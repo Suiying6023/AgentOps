@@ -41,21 +41,17 @@ class Settings(BaseSettings):
     PORT: int = 8080
     LOG_LEVEL: LogLevel = LogLevel.INFO
 
-    AUTH_SECRET: SecretStr | None = None
-    OPENAI_API_KEY: SecretStr | None = None
-    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
-    DEEPSEEK_API_KEY: SecretStr | None = None
-    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
-    GEMAI_API_KEY: SecretStr | None = None
-    GEMAI_BASE_URL: str = "https://api.gemai.cc/v1"
-    GEMAI_RERANKER_MODEL: str = "qwen3-reranker-8b"
+    LLM_API_KEY: SecretStr | None = None
+    LLM_BASE_URL: str = "https://api.openai.com/v1"
+    
+    EMBEDDING_API_KEY: SecretStr | None = None
+    EMBEDDING_BASE_URL: str = "https://api.openai.com/v1"
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    RERANKER_MODEL: str = "bge-reranker-v2-m3"
     
     # 核心组件开关：True 代表使用本地 BGE-M3， False 代表使用在线的 GEMAI Embedding
     USE_LOCAL_EMBEDDING: bool = False
     
-    SILICONFLOW_PRIMARY_KEY: SecretStr | None = None
-    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
-    SILICONFLOW_FALLBACK_KEY: SecretStr | None = None
     LANGFUSE_ENABLED: bool = True
 
     # PostgreSQL 关系与向量数据库配置
@@ -81,7 +77,7 @@ class Settings(BaseSettings):
         return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
 
     # 默认模型设置
-    DEFAULT_MODEL: str = "siliconflow/deepseek-ai/DeepSeek-V3.2"
+    DEFAULT_MODEL: str = "deepseek-ai/DeepSeek-V3.2"
     def is_dev(self) -> bool:
         return self.MODE == "dev"
 

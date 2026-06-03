@@ -7,6 +7,7 @@ from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import asyncio
 import sys
+import httpx
 
 from core.settings import settings
 
@@ -14,7 +15,7 @@ class ToolAwareFakeModel(FakeListChatModel):
     def bind_tools(self, tools, **kwargs):
         return self
 
-class SiliconFlowChatOpenAI(ChatOpenAI):
+class UnifiedChatOpenAI(ChatOpenAI):
     """
     为不支持 n > 1 的模型提供并发降级支持。
     自动拦截 n>1 的请求，拆解为 n 个独立请求并并发执行，最后合并结果。
@@ -94,32 +95,12 @@ class SiliconFlowChatOpenAI(ChatOpenAI):
 def get_model(model_name: str | None = None) -> BaseChatModel:
     """根据传入的模型名称动态实例化并返回对应的 LangChain ChatModel。"""
     # 如果没有指定模型，则使用 settings 中的默认模型
-    target_model_full = model_name or settings.DEFAULT_MODEL
+    target_model = model_name or settings.DEFAULT_MODEL
     
-    if "/" in target_model_full:
-        provider, target_model = target_model_full.split("/", 1)
-    else:
-        provider = "default"
-        target_model = target_model_full
+    api_key = settings.LLM_API_KEY.get_secret_value() if settings.LLM_API_KEY else ""
+    base_url = settings.LLM_BASE_URL
 
-    api_key = ""
-    base_url = None
-
-    if provider == "openai":
-        api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else ""
-        base_url = settings.OPENAI_BASE_URL
-    elif provider == "deepseek":
-        api_key = settings.DEEPSEEK_API_KEY.get_secret_value() if settings.DEEPSEEK_API_KEY else ""
-        base_url = settings.DEEPSEEK_BASE_URL
-    elif provider == "siliconflow":
-        api_key = settings.SILICONFLOW_PRIMARY_KEY.get_secret_value() if settings.SILICONFLOW_PRIMARY_KEY else ""
-        base_url = settings.SILICONFLOW_BASE_URL
-    else:
-        # 兜底旧逻辑，防止未识别厂商报错
-        api_key = settings.OPENAI_API_KEY.get_secret_value() if settings.OPENAI_API_KEY else ""
-        base_url = None
-
-    return SiliconFlowChatOpenAI(
+    return UnifiedChatOpenAI(
         model=target_model,
         api_key=cast(str, api_key) if api_key else "empty",
         base_url=base_url,
@@ -152,14 +133,44 @@ def get_embeddings() -> Embeddings:
         from langchain_openai import OpenAIEmbeddings
         from typing import cast
         
-        api_key = cast(str, settings.GEMAI_API_KEY.get_secret_value() if settings.GEMAI_API_KEY else "")
-        print("🔧 初始化在线 Embedding 模型 (qwen3-embedding-8b)", file=sys.stderr)
+        api_key = cast(str, settings.EMBEDDING_API_KEY.get_secret_value() if settings.EMBEDDING_API_KEY else "")
+        print(f"🔧 初始化在线 Embedding 模型 ({settings.EMBEDDING_MODEL})", file=sys.stderr)
         
         return OpenAIEmbeddings(
-            model="qwen3-embedding-8b",
+            model=settings.EMBEDDING_MODEL,
             api_key=api_key,
-            base_url=settings.GEMAI_BASE_URL,
+            base_url=settings.EMBEDDING_BASE_URL,
             dimensions=1536,
             chunk_size=10,  # 严格限制单次请求的文本数 (Batch Size)，避免 Payload 过大被 WAF 阻断
             max_retries=3,  # 遇到 429/502 等问题时，利用 Langchain 原生机制进行指数退避重试
         )
+
+_fallback_cache = None
+
+async def get_fallback_model_id() -> str:
+    global _fallback_cache
+    if _fallback_cache:
+        return _fallback_cache
+    
+    from core.settings import settings
+    api_key = settings.LLM_API_KEY.get_secret_value() if settings.LLM_API_KEY else ""
+    base_url = settings.LLM_BASE_URL
+    url = base_url.rstrip("/") + "/models"
+    
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+            resp.raise_for_status()
+            models = [m["id"] for m in resp.json().get("data", [])]
+            if models:
+                if settings.DEFAULT_MODEL in models:
+                    _fallback_cache = settings.DEFAULT_MODEL
+                else:
+                    _fallback_cache = models[0]
+                return _fallback_cache
+    except Exception:
+        pass
+    _fallback_cache = settings.DEFAULT_MODEL or "Qwen/Qwen2.5-7B-Instruct"
+    return _fallback_cache
+

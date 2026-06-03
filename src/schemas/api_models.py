@@ -3,11 +3,6 @@ from pydantic import BaseModel, Field
 from enum import StrEnum
 from typing import TypeAlias
 
-class Provider(StrEnum):
-    OPENAI = "openai"
-    DEEPSEEK = "deepseek"
-    SILICONFLOW = "siliconflow"
-    FAKE = "fake"
 
 class AgentInfo(BaseModel):
     """一个可用 Agent 的基本信息。"""

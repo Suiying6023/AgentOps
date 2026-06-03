@@ -2,7 +2,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from main import app
-from core.memory import chat_history_store
+from db.chat_history import chat_history_store
 import sys
 import asyncio
 import os
@@ -48,7 +48,7 @@ def mock_mcp_tools():
 @pytest.fixture(autouse=True)
 async def setup_checkpointer():
     """测试时自动初始化全局 Checkpointer，否则脱离 FastAPI 生命周期的测试会报错"""
-    from core.memory import init_global_checkpointer, close_global_checkpointer
+    from db.chat_history import init_global_checkpointer, close_global_checkpointer
     await init_global_checkpointer()
     yield
     await close_global_checkpointer()

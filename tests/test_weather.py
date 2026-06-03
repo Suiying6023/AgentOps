@@ -18,7 +18,7 @@ def test_weather_stream():
     # 建立流式连接
     with httpx.stream("POST", url, json=payload, headers=headers, timeout=30.0) as response:
         if response.status_code != 200:
-            print(f"❌ 请求失败，状态码: {response.status_code}")
+            print(f"请求失败，状态码: {response.status_code}")
             print(response.read().decode())
             return
             
@@ -34,7 +34,7 @@ def test_weather_stream():
                         # 实时打印出来的碎片
                         print(data["content"], end="", flush=True)
                     elif data["type"] == "done":
-                        print("\n\n✅ [流式传输结束]")
+                        print("\n\n[流式传输结束]")
                 except json.JSONDecodeError:
                     pass
 
