@@ -10,46 +10,33 @@ __pycache__/
 .coverage
 htmlcov/
 coverage.xml
+.benchmarks/
 
 # -------------------------
-# IDE / 编辑器配置
+# IDE / 编辑器配置 / 系统缓存
 # -------------------------
 .vscode/
 .idea/
-
-# -------------------------
-# Node.js / Next.js
-# -------------------------
-frontend/node_modules/
-frontend/.next/
-frontend/out/
-frontend/build/
-frontend/.vercel/
-frontend/.eslintcache
-frontend/*.tsbuildinfo
+.DS_Store
 
 # -------------------------
 # 环境密钥与安全
 # -------------------------
-.env
+.env*
+!.env.example
 *.pem
 
 # -------------------------
-# AgentOps 开发期副产物 (强烈拒绝入库)
+# AgentOps 研发期副产物
 # -------------------------
-# 1. 临时测试代码
+# 1. 临时调试文件
 debug_*.py
 check_*.py
-sig.txt
+*.log
 
-# 2. 学习记录与规划文档
-概览/
-备份.md
-
-# 3. 本地状态与存储 (知识库、测试集、SQLite 记忆)
+# 2. 本地状态与测试数据 (强隔离)
 data/
-vector_db/
 docs/
 
-# 4. 开发测试脚本 (由于作为开源骨架，目前排除评估逻辑，只留核心 src)
+# 3. 开发测试脚本 (开源骨架需隔离评估逻辑)
 scripts/
